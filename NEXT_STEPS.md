@@ -1,60 +1,76 @@
 # Command Centre — Next-Step Plan
 
-Status: agreed plan, awaiting approval to execute. No steps below have been run.
+Status: Steps 1-4 COMPLETE and verified. Step 5 deferred.
 
-## Current state (as of 2026-10-10)
+## Current state (updated 2026-10-12)
 
-- Phase 0 and the local dashboard portion of Phase 1 are COMPLETE.
-- The dashboard server is STOPPED (the test process was killed deliberately).
-- Only TEST records exist in the store: 2 tasks, 1 goal, 0 commitments.
-  All are clearly labelled "Test ..." and contain no real personal data.
-- Chat-to-store has NOT yet been verified end-to-end: task capture so far
-  was demonstrated via the cc_store.py CLI, not via a live Hermes chat
-  message routed through the command-centre skill.
-- The command-centre skill is installed and loaded
+- Steps 1-4 of the original plan are DONE and verified.
+- The store currently holds TEST records plus real tasks added during
+  verification (e.g. "TEST - chat-to-store verification"). No production
+  migration of records has been performed.
+- The command-centre skill is installed
   (~/AppData/Local/hermes/skills/command-centre/SKILL.md).
-- No Hermes configuration was changed. No packages installed. No accounts
-  connected. No scheduled jobs created. No external integrations.
+- Code is under git (master). Key commits: de8d1ad (initial),
+  d3c9ad9 (MagicDNS Host/Origin allowlist for Tailscale Serve).
+- Operational data (data/, backups/) and lock files are NOT tracked.
 
 ## Built so far (for reference)
 
 - lib/cc_store.py — shared write layer (validation, msvcrt locking, atomic
-  writes, backup-before-mutation, append-only activity log, CLI).
+  writes, backup-before-mutation, append-only activity log, CLI,
+  verify-before-prune retention, dedicated backups lock).
 - lib/cc_dashboard.py — standalone stdlib dashboard, localhost-only
-  (127.0.0.1:8787). Read-only state + complete operations only; no
-  arbitrary execution, no Hermes tool access.
-- tests/test_cc.py — concurrency + durability test (passing).
-- data/*.jsonl — portable human-readable records (test data only).
+  (127.0.0.1:8787) plus a task-creation form. Read/state + narrow write
+  operations only; no arbitrary execution, no Hermes tool access.
+- tests/test_cc.py, test_backups.py, test_dashboard.py,
+  test_dashboard_frontend.py — all passing.
+- data/*.jsonl — portable human-readable records.
 
-## Planned steps (in order; each gated on the previous being tested)
+## Completed steps
 
-1. Verify live chat-to-skill-to-store.
-   - Exercise task creation, read-back, partial update and completion via
-     an actual Hermes chat turn using the command-centre skill.
-   - Use clearly identified test data (e.g. titles prefixed "TEST-").
-   - Confirm each action lands as a structured record, updates correctly,
-     and is written to the activity log with the right actor.
+1. Verify live chat-to-skill-to-store. DONE — task create/read/update/
+   complete exercised through the skill against cc_store; verified the
+   inbox default fix (status no longer null on create).
 
-2. Add a dashboard task-creation form.
-   - A minimal create-task UI on the dashboard.
-   - ALL writes routed through cc_store.py (same validation, locking,
-     atomic writes, backup, activity log). No direct file writes.
+2. Dashboard task-creation form. DONE — create form added; all writes go
+   through cc_store; new POST /api/tasks/create endpoint.
 
-3. Implement backup retention and verify recovery safety.
-   - Backups are currently one snapshot per mutation (wasteful at volume).
-   - Add retention/pruning, then re-verify restore reproduces a snapshot
-     exactly and reverts post-backup changes.
+3. Backup retention and recovery. DONE — verify-before-prune retention
+   (keep=20 default, CC_BACKUP_KEEP override); collision-proof same-second
+   snapshot naming; atomic snapshot visibility; dedicated backups lock
+   (.cc.lock.backups) serialising publish/verify/prune/restore with a fixed
+   lock order (backups before data). Race and durability tests pass.
 
-4. Evaluate authenticated private remote access.
-   - ONLY after steps 1-3 are tested.
-   - Add authentication and a private transport (VPN or authenticated
-     reverse proxy) BEFORE any non-localhost binding. No public URL,
-     no port forwarding, no exposure without explicit approval.
+4. Authenticated private remote access. DONE (network-level, no app auth).
+   - Dashboard stays bound to 127.0.0.1:8787 (hardcoded, unchanged).
+   - Tailscale Serve (tailnet-only, NOT Funnel) proxies
+     https://desktop-s7i2r4o.tail7d2d07.ts.net:443 -> http://127.0.0.1:8787.
+   - Dashboard Host/Origin allowlist extended with the exact PC MagicDNS
+     hostname (no wildcard) so proxied requests are not rejected.
+   - Access control is enforced by Tailscale network policy ONLY: tailnet
+     ACL restricted to phone (100.70.29.52) -> PC (100.104.50.68) on
+     tcp:443. The dashboard authenticates nobody.
+   - Phone access verified working by the user.
+   - SECURITY NOTE: this design does NOT protect against a malicious
+     process already running locally on the PC (it can call
+     127.0.0.1:8787 directly and forge any header, incl. Tailscale-* ones).
+     This was an explicit accepted trade-off in favour of Tailscale
+     network-level control.
 
-5. DEFERRED (not to be started without a separate decision):
-   - Scheduled briefings / cron.
-   - Obsidian integration.
-   - SQLite migration evaluation.
+## Deferred (step 5) — needs a separate decision
+
+- Scheduled briefings / cron.
+- Obsidian integration.
+- SQLite migration evaluation.
+
+## Optional follow-ups (not blocking)
+
+- Switch the tailnet ACL from device IPs to tags (tag:cc-phone ->
+  tag:cc-pc, tcp:443) so access survives a phone IP change.
+- Enable Tailscale device approval in the admin console (not visible from
+  the CLI).
+- Decide on dashboard auto-start (currently manual: python
+  lib/cc_dashboard.py) so it survives reboots.
 
 ## Standing constraints (carry forward)
 
@@ -71,10 +87,15 @@ Status: agreed plan, awaiting approval to execute. No steps below have been run.
 - No scheduled jobs, account connections, system-wide package installs,
   Hermes config changes, or external service integrations without approval.
 
-## How to resume
+## How to run
 
   cd C:/Users/ruair/command-center
-  python lib/cc_store.py state        # see current test data
-  python lib/cc_dashboard.py          # then open http://127.0.0.1:8787
+  python lib/cc_store.py state        # see current data
+  python lib/cc_dashboard.py          # local: http://127.0.0.1:8787
+                                      # phone: https://desktop-s7i2r4o.tail7d2d07.ts.net
+                                      #        (via Tailscale Serve, tailnet-only)
 
-Then approve step 1 to begin.
+Tests: python tests/test_cc.py ; tests/test_backups.py ;
+       tests/test_dashboard.py ; tests/test_dashboard_frontend.py
+
+See README.md for architecture and usage.
