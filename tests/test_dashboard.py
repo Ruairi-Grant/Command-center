@@ -230,6 +230,37 @@ def main():
         assert st == 201, "legitimate local request rejected: %s %s" % (st, body)
         print("[M2] local Host + local Origin accepted (201)")
 
+        # --- 12a. M2: the PC's exact MagicDNS hostname is accepted ---
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "M2 magicdns host"},
+            headers={"Host": "desktop-s7i2r4o.tail7d2d07.ts.net",
+                     "Origin": "https://desktop-s7i2r4o.tail7d2d07.ts.net",
+                     "Content-Type": "application/json"})
+        assert st == 201, "MagicDNS Host+Origin rejected: %s %s" % (st, body)
+        print("[M2] PC MagicDNS Host + matching Origin accepted (201)")
+
+        # --- 12b. M2: a DIFFERENT tailnet hostname must still be rejected ---
+        before = len(open(os.path.join(home, "data/tasks.jsonl"), encoding="utf-8").readlines())
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "M2 wrong tailnet host"},
+            headers={"Host": "ruairs-s24.tail7d2d07.ts.net",
+                     "Origin": "https://ruairs-s24.tail7d2d07.ts.net",
+                     "Content-Type": "application/json"})
+        assert st == 403, "another tailnet host was accepted: %s %s" % (st, body)
+        after = len(open(os.path.join(home, "data/tasks.jsonl"), encoding="utf-8").readlines())
+        assert before == after, "rejected wrong-tailnet request mutated the store!"
+        print("[M2] other tailnet hostname -> 403, no write (exact host only)")
+
+        # --- 12c. M2: a WILDCARD/subdomain must NOT match (no wildcarding) ---
+        for bad_host in ("evil.tail7d2d07.ts.net",
+                         "desktop-s7i2r4o.tail7d2d07.ts.net.evil.com",
+                         "sub.desktop-s7i2r4o.tail7d2d07.ts.net"):
+            st, body, hdrs = raw_request(
+                base + "/api/tasks/create", payload={"title": "M2 wildcard probe"},
+                headers={"Host": bad_host, "Content-Type": "application/json"})
+            assert st == 403, "wildcard/subdomain %r was accepted: %s" % (bad_host, st)
+        print("[M2] subdomain/wildcard Host variants -> 403 (no wildcard match)")
+
         # --- 12b. M2: request with no Origin accepted (same-origin fetch / curl) ---
         st, body, hdrs = raw_request(
             base + "/api/tasks/create", payload={"title": "M2 no origin"},

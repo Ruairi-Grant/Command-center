@@ -38,25 +38,33 @@ import cc_store as cc  # noqa: E402
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("CC_PORT", "8787"))
 
-# Host allowlist (M2). The dashboard is served from localhost, so requests
-# must carry a loopback Host header. The port is part of the Host header
-# and varies (default 8787, tests use others), so hosts are matched by
-# hostname only — the port is stripped before comparison. Override with
-# CC_ALLOWED_HOSTS (comma-separated) if a different local hostname is ever
-# used deliberately.
+# Host allowlist. The dashboard is served from localhost, so requests
+# normally carry a loopback Host header. The port is part of the Host
+# header and varies (default 8787, tests use others), so hosts are matched
+# by hostname only — the port is stripped before comparison.
+#
+# PC_MAGICDNS_HOST is this machine's exact Tailscale MagicDNS hostname.
+# It is added so that requests proxied through Tailscale Serve (which
+# forwards the tailnet hostname) are not rejected by the Host/Origin
+# checks. This is an EXACT hostname, never a wildcard. NOTE: adding it
+# here is NOT authentication — it only stops the anti-cross-origin checks
+# from blocking legitimate proxied traffic. Access control is a separate,
+# still-pending concern (see Phase 4).
+PC_MAGICDNS_HOST = "desktop-s7i2r4o.tail7d2d07.ts.net"
 LOCAL_HOSTNAMES = ("127.0.0.1", "localhost", "[::1]")
 _extra = [h.strip() for h in os.environ.get("CC_ALLOWED_HOSTS", "").split(",") if h.strip()]
-ALLOWED_HOSTNAMES = frozenset(LOCAL_HOSTNAMES) | frozenset(_extra)
+ALLOWED_HOSTNAMES = frozenset(LOCAL_HOSTNAMES) | {PC_MAGICDNS_HOST} | frozenset(_extra)
 
-# Origin policy for state-changing requests (M2):
+# Origin policy for state-changing requests:
 #   - A request with no Origin header is allowed. This is the normal case
 #     for the dashboard's own fetch() calls and for curl/API clients —
 #     browsers only send Origin on cross-origin or form submissions, never
 #     on a same-origin fetch(). Missing Origin therefore means "not a
 #     browser cross-origin request" and is safe to allow.
-#   - If Origin is present it MUST be a loopback origin matching this
-#     server's scheme/host/port, otherwise the request is rejected. A
-#     cross-origin Origin from any other site is refused.
+#   - If Origin is present it MUST name an allowed hostname: loopback, or
+#     the PC's exact MagicDNS hostname (so the page served through
+#     Tailscale Serve can make its own same-origin fetch() calls). Any
+#     other cross-origin request is refused.
 # Validation is done explicitly here; we do NOT rely on CORS preflight
 # behaviour, which is incidental and easily broken by config changes.
 
