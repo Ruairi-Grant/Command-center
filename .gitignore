@@ -1,0 +1,17 @@
+# Operational data — portable and human-readable by design, but NOT
+# versioned. Committing personal records would put them permanently in
+# git history, and backups/ is high-churn snapshot data.
+data/
+backups/
+
+# Cross-process advisory lock files (runtime state, not source)
+.cc.lock
+.cc.lock.backups
+
+# Python
+__pycache__/
+*.pyc
+
+# Temp files written next to data during atomic writes
+*.tmp-*
+.tmp-*
