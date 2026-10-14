@@ -347,6 +347,92 @@ def main():
         assert listening and all("127.0.0.1:%d" % PORT in l for l in listening), \
             "dashboard not bound to localhost: %r" % listening
         print("[bind] still 127.0.0.1 only: %s" % listening[0].strip())
+
+        # repair any data files earlier fault-injection tests corrupted, so
+        # the identity tests below run against clean data
+        for _k in ("tasks", "goals", "commitments"):
+            _fp = os.path.join(home, "data", _k + ".jsonl")
+            _good = []
+            for _l in open(_fp, encoding="utf-8"):
+                if not _l.strip():
+                    continue
+                try:
+                    json.loads(_l)
+                    _good.append(_l)
+                except ValueError:
+                    pass
+            with open(_fp, "w", encoding="utf-8") as _fh:
+                _fh.writelines(_good)
+
+        # === IDENTITY GATE TESTS (Tailscale Serve provenance) ===
+        MAGIC = "desktop-s7i2r4o.tail7d2d07.ts.net"
+        LOGIN = "ruairi.j.grant@gmail.com"
+
+        # --- 18. valid Serve request (provenance + correct identity) accepted ---
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "TS identity ok"},
+            headers={"Host": MAGIC, "Origin": "https://" + MAGIC,
+                     "X-Forwarded-Proto": "https", "X-Forwarded-Host": MAGIC,
+                     "Tailscale-User-Login": LOGIN,
+                     "Content-Type": "application/json"})
+        assert st == 201, "valid Serve request rejected: %s %s" % (st, body)
+        print("[identity] Serve request with correct identity -> 201")
+
+        # --- 18b. valid identity on a state-changing complete ---
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/complete", payload={"id": tid},
+            headers={"Host": MAGIC, "Origin": "https://" + MAGIC,
+                     "X-Forwarded-Proto": "https", "X-Forwarded-Host": MAGIC,
+                     "Tailscale-User-Login": LOGIN,
+                     "Content-Type": "application/json"})
+        assert st == 200, "Serve complete with correct identity rejected: %s %s" % (st, body)
+        print("[identity] Serve complete with correct identity -> 200")
+
+        # --- 19. missing identity on a Serve request -> rejected ---
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "no identity"},
+            headers={"Host": MAGIC, "Origin": "https://" + MAGIC,
+                     "X-Forwarded-Proto": "https", "X-Forwarded-Host": MAGIC,
+                     "Content-Type": "application/json"})
+        assert st == 403, "Serve request without identity accepted: %s %s" % (st, body)
+        print("[identity] Serve request missing identity -> 403")
+
+        # --- 19b. wrong/unexpected identity -> rejected ---
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "wrong identity"},
+            headers={"Host": MAGIC, "Origin": "https://" + MAGIC,
+                     "X-Forwarded-Proto": "https", "X-Forwarded-Host": MAGIC,
+                     "Tailscale-User-Login": "attacker@evil.com",
+                     "Content-Type": "application/json"})
+        assert st == 403, "Serve request with wrong identity accepted: %s %s" % (st, body)
+        print("[identity] Serve request wrong identity -> 403")
+
+        # --- 19c. provenance present but forwarded-host is NOT the PC -> not Serve-mode,
+        #         and Host is the MagicDNS name, so it passes Host; identity not required.
+        #         This documents that only EXACT provenance triggers the gate. ---
+        # (covered implicitly by 12b/12c; here we confirm a mismatched forwarded
+        #  host does not accidentally enter Serve mode with a bogus identity)
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "fake provenance"},
+            headers={"Host": MAGIC, "Origin": "https://" + MAGIC,
+                     "X-Forwarded-Proto": "https",
+                     "X-Forwarded-Host": "evil.tail7d2d07.ts.net",
+                     "Tailscale-User-Login": "attacker@evil.com",
+                     "Content-Type": "application/json"})
+        # forwarded-host != PC -> not Serve-mode -> identity not checked ->
+        # Host is the allowed MagicDNS name -> accepted. This is expected:
+        # a remote caller cannot set X-Forwarded-Host (Serve strips it), and
+        # the tailnet ACL already restricts reachability. Documented behaviour.
+        assert st == 201, "mismatched forwarded-host should not enter Serve mode: %s %s" % (st, body)
+        print("[identity] non-PC forwarded-host does NOT trigger identity gate (documented)")
+
+        # --- 20. plain localhost requests are unaffected (local mode) ---
+        st, body, hdrs = raw_request(
+            base + "/api/tasks/create", payload={"title": "local mode ok"},
+            headers={"Host": "127.0.0.1:%d" % PORT,
+                     "Content-Type": "application/json"})
+        assert st == 201, "plain localhost request broke: %s %s" % (st, body)
+        print("[identity] plain localhost request unaffected (local mode) -> 201")
     finally:
         srv.terminate()
         try:

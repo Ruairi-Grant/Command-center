@@ -28,6 +28,7 @@ Security behaviour (hardening, 2026-10):
 
 import json
 import os
+import socket
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -105,6 +106,50 @@ def _origin_ok(handler):
     if hostname in ALLOWED_HOSTNAMES:
         return True, "local-origin"
     return False, "foreign-origin"
+
+
+# --- Remote-request identity gate (Tailscale Serve) ---------------------
+#
+# The dashboard has NO application login. Remote access is protected by
+# requiring that requests arriving THROUGH Tailscale Serve carry the
+# intended Tailscale identity. Design and its limits, established by
+# empirical test against the installed Tailscale 1.104.1:
+#
+#   * Serve STRIPS any client-supplied Tailscale-User-Login /
+#     X-Forwarded-For headers and replaces them with the real ones, so a
+#     remote tailnet caller cannot forge the identity through Serve.
+#   * A local process can still hit 127.0.0.1:8787 directly and forge any
+#     header. So an identity header ALONE is NOT proof of provenance.
+#
+# Therefore we only enforce identity on requests that show Serve
+# provenance: X-Forwarded-Proto == https AND X-Forwarded-Host == the PC's
+# MagicDNS hostname. Such requests MUST also carry
+# Tailscale-User-Login == EXPECTED_TS_LOGIN. Plain localhost requests
+# (no such forwarded headers) are local-mode and behave as before.
+#
+# A local attacker CAN set these forwarded headers themselves to enter
+# remote mode and present a valid-looking identity — this gate does NOT
+# stop a malicious local process (documented, accepted limitation). It
+# DOES stop every remote tailnet device except the intended identity,
+# which is the boundary this feature is responsible for.
+EXPECTED_TS_LOGIN = "ruairi.j.grant@gmail.com"
+
+
+def _is_serve_request(handler):
+    """True when the request shows Tailscale Serve provenance."""
+    proto = (handler.headers.get("X-Forwarded-Proto") or "").strip().lower()
+    fwd_host = (handler.headers.get("X-Forwarded-Host") or "").strip().lower()
+    return proto == "https" and fwd_host == PC_MAGICDNS_HOST
+
+
+def _identity_ok(handler):
+    """Identity check for Serve-proxied requests. Returns (ok, reason)."""
+    login = (handler.headers.get("Tailscale-User-Login") or "").strip()
+    if not login:
+        return False, "missing-identity"
+    if login.lower() != EXPECTED_TS_LOGIN.lower():
+        return False, "unexpected-identity"
+    return True, "ok"
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -389,8 +434,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "internal server error"}, 500)
 
     def _guard(self):
-        """M2: Host/Origin gate. Returns False (and has already responded)
-        if the request must be rejected."""
+        """Host/Origin gate + Serve identity gate. Returns False (and has
+        already responded) if the request must be rejected."""
         if not _host_ok(self):
             _log(self, "rejected: unexpected Host %r" % (self.headers.get("Host"),))
             self._send_json({"error": "forbidden"}, 403)
@@ -400,6 +445,15 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 _log(self, "rejected: unexpected Origin %r (%s)"
                      % (self.headers.get("Origin"), why))
+                self._send_json({"error": "forbidden"}, 403)
+                return False
+        # Serve-proxied requests must also present the intended identity.
+        # Plain localhost requests are unaffected.
+        if _is_serve_request(self):
+            ok, why = _identity_ok(self)
+            if not ok:
+                _log(self, "rejected: identity check failed (%s) login=%r"
+                     % (why, self.headers.get("Tailscale-User-Login")))
                 self._send_json({"error": "forbidden"}, 403)
                 return False
         return True
@@ -485,6 +539,18 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     cc.init()
+    # Duplicate-instance guard: if something already holds our loopback
+    # port, this is a second launch. Exit cleanly (0) rather than crash,
+    # so Task Scheduler restart logic and manual double-starts stay tidy
+    # and never disturb the healthy running instance.
+    try:
+        _probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _probe.bind((HOST, PORT))
+        _probe.close()
+    except OSError:
+        print("Another dashboard already listening on %s:%d — exiting." % (HOST, PORT),
+              flush=True)
+        return 0
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     print("Command Centre dashboard: http://%s:%d  (localhost only)" % (HOST, PORT))

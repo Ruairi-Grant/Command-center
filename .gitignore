@@ -4,6 +4,9 @@
 data/
 backups/
 
+# Runtime dashboard logs (regenerated; never versioned)
+logs/
+
 # Cross-process advisory lock files (runtime state, not source)
 .cc.lock
 .cc.lock.backups
