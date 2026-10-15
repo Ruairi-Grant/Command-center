@@ -79,6 +79,13 @@ From your phone (optional, via Tailscale):
   `https://desktop-s7i2r4o.tail7d2d07.ts.net` (tailnet only) to
   `http://127.0.0.1:8787`.
 - Open that URL in your phone's browser while connected to the tailnet.
+- **Turn OFF "Private DNS" on the phone** (Android: Settings → Network &
+  internet → Private DNS → Off). Android's DNS-over-TLS hijacks name
+  resolution and breaks the MagicDNS hostname lookup, so the page will
+  hang and fail with "cannot be reached" if Private DNS is on. With it
+  off, the hostname resolves through the tailnet and the page loads.
+  (If you ever re-enable it, `https://100.104.50.68` — the PC's tailnet
+  IP — still works as a fallback.)
 
 ## Using the store from the command line
 
@@ -113,16 +120,24 @@ python tests/test_dashboard_frontend.py  # dashboard page wiring
 
 ## Security model (read this)
 
-- The dashboard is unauthenticated. It is safe because it binds to
+- The dashboard has no application login. It is safe because it binds to
   `127.0.0.1` only and is reachable remotely solely through Tailscale
   Serve, which is tailnet-only.
-- Remote access is controlled by Tailscale network policy (tailnet ACL +
-  device approval), NOT by the application. The dashboard authenticates
-  nobody and does not verify Tailscale identity headers.
-- Consequence: this protects against remote/network attackers, but it does
-  NOT protect against a malicious process already running on the PC — such
-  a process can call `127.0.0.1:8787` directly and forge any header. This
-  is an accepted trade-off for a single-user personal tool.
+- Remote requests arriving through Serve must carry the intended Tailscale
+  identity: the dashboard checks `X-Forwarded-Proto`/`X-Forwarded-Host`
+  for Serve provenance and requires `Tailscale-User-Login` to match the
+  expected account, else 403. This was verified empirically against the
+  installed Tailscale: Serve strips client-supplied identity/forwarded
+  headers, so a remote caller cannot forge a different identity through
+  Serve.
+- Access is additionally restricted at the network layer by the Tailscale
+  policy (tailnet ACL limits which device may reach the PC on tcp:443),
+  independent of the application check.
+- Consequence: this protects against remote/network attackers and other
+  tailnet devices, but it does NOT protect against a malicious process
+  already running on the PC — such a process can call `127.0.0.1:8787`
+  directly and forge any header, including the Serve/identity ones. This
+  is a documented, accepted trade-off for a single-user personal tool.
 - The dashboard validates the `Host` and `Origin` headers (loopback plus
   the PC's exact MagicDNS hostname) to block cross-origin browser abuse,
   and returns generic errors so internal paths are never leaked.
