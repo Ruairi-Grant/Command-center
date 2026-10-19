@@ -69,7 +69,7 @@ in git; the data is yours and portable, not source code.
 Local (on the PC):
 
 ```
-cd C:/Users/ruair/command-center
+cd C:/git_repos/command-center
 python lib/cc_dashboard.py
 # open http://127.0.0.1:8787
 ```

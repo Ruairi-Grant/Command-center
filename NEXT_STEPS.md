@@ -89,7 +89,7 @@ Status: Steps 1-4 COMPLETE and verified. Runtime PROD/DEV dashboard switching CO
 
 ## How to run
 
-  cd C:/Users/ruair/command-center
+  cd C:/git_repos/command-center
   python lib/cc_store.py state        # see current data
   python lib/cc_dashboard.py          # local: http://127.0.0.1:8787
                                       # phone: https://desktop-s7i2r4o.tail7d2d07.ts.net
