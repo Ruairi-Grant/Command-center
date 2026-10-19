@@ -116,12 +116,21 @@ python lib/cc_store.py backups prune [--keep N]   # prune old snapshots
 python lib/cc_store.py restore --from backups/<dir> --yes   # DESTRUCTIVE
 ```
 
-New tasks default to status `inbox` and priority `normal`.
+The approved UI specification requires new tasks to default to status `active` and priority `normal`. Existing compatibility records may still contain legacy fields.
 
 ## Tests
 
 All tests run against isolated temporary data, so they never touch your
-real records.
+real records. The consolidated test plan and specification matrix are in
+`docs/test-plan.md`.
+
+Run the complete suite with:
+
+```
+python tests/run_all.py
+```
+
+The existing individual suites can also be run directly:
 
 ```
 python tests/test_cc.py                  # store: validation, concurrency, durability
