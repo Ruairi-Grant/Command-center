@@ -782,6 +782,33 @@ def due_on_or_before(t, day):
     return bool(d) and d <= day.isoformat()
 
 
+def _organisation_tree(tasks, goals):
+    records = [r for r in goals + tasks if r.get("kind")]
+    by_parent = {}
+    for rec in records:
+        by_parent.setdefault(rec.get("parent_id"), []).append(rec)
+
+    def node(rec):
+        children = sorted(by_parent.get(rec.get("id"), []),
+                          key=lambda x: (x.get("status") == "done", x.get("title", "").lower()))
+        return {
+            "id": rec["id"],
+            "title": rec.get("title", ""),
+            "kind": rec.get("kind"),
+            "status": rec.get("status"),
+            "priority": rec.get("priority"),
+            "due": rec.get("due"),
+            "target": rec.get("target"),
+            "next_action": rec.get("next_action"),
+            "waiting_on": rec.get("waiting_on"),
+            "done_when": rec.get("done_when"),
+            "children": [node(child) for child in children],
+        }
+
+    roots = sorted(by_parent.get(None, []), key=lambda x: x.get("title", "").lower())
+    return [node(root) for root in roots]
+
+
 def build_state(home=None):
     """Compute the dashboard state view from the raw files.
 
@@ -812,6 +839,7 @@ def build_state(home=None):
             "no_date": [c for c in commitments if not c.get("done") and not c.get("due")],
         },
         "goals": [g for g in goals if g.get("status") == "active"],
+        "organisation": _organisation_tree(tasks, goals),
     }
 
 

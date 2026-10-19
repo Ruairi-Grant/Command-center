@@ -204,6 +204,17 @@ PAGE = """<!doctype html>
   .goal ul { margin-top: 6px; padding-left: 18px; list-style: disc; }
   .goal li { border: none; padding: 2px 0; font-size: 13px; color: #b6bdcf; }
   .stamp { font-size: 11px; color: #5c6478; }
+  .organisation { margin: 18px 0 24px; }
+  .organisation h2 { margin-top: 0; }
+  .org-tree { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 10px 14px; }
+  .org-node { margin: 5px 0; }
+  .org-node > summary { cursor: pointer; list-style-position: outside; }
+  .org-node > summary::marker { color: #68738a; }
+  .org-label { font-size: 14px; }
+  .org-kind, .org-status { font-size: 10px; margin-left: 7px; padding: 2px 6px; border-radius: 10px; color: #aeb7c9; background: #232a38; }
+  .org-status.waiting { color: #f4c77f; }
+  .org-next, .org-waiting { margin: 4px 0 4px 20px; font-size: 12px; color: #8b93a5; }
+  .org-children { margin-left: 18px; }
   form.newtask { background: #161a24; border: 1px solid #262c3a; border-radius: 10px;
                  padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   form.newtask .field { display: flex; flex-direction: column; gap: 4px; }
@@ -251,6 +262,10 @@ PAGE = """<!doctype html>
     <button type="submit">Add task</button>
     <span class="hint">status defaults to inbox</span>
   </form>
+  <section class="organisation" id="organisation">
+    <h2>Organisation</h2>
+    <div class="org-tree" id="organisation-tree"><div class="empty">Loading…</div></div>
+  </section>
   <div id="list"><div class="empty">Loading…</div></div>
 </main>
 <div class="toast" id="toast"></div>
@@ -258,6 +273,7 @@ PAGE = """<!doctype html>
 const app = document.getElementById('app');
 const list = document.getElementById('list');
 const form = document.getElementById('newtask');
+const orgTree = document.getElementById('organisation-tree');
 const meta = document.getElementById('meta');
 const store = document.getElementById('store');
 const toast = document.getElementById('toast');
@@ -307,6 +323,20 @@ function section(title, items, render, today) {
   return html;
 }
 
+function renderOrganisation(organisation) {
+  function renderNode(n) {
+    const label = '<span class="org-label">' + esc(n.title) + '</span>'
+      + '<span class="org-kind">' + esc(n.kind) + '</span>'
+      + '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>';
+    const details = (n.next_action ? '<div class="org-next">Next: ' + esc(n.next_action) + '</div>' : '')
+      + (n.waiting_on ? '<div class="org-waiting">Waiting on: ' + esc(n.waiting_on) + '</div>' : '');
+    if (!n.children.length) return '<div class="org-node">' + label + details + '</div>';
+    return '<details class="org-node" open><summary>' + label + '</summary>'
+      + details + '<div class="org-children">' + n.children.map(renderNode).join('') + '</div></details>';
+  }
+  return organisation.map(renderNode).join('') || '<div class="empty">No organisation items yet.</div>';
+}
+
 async function load() {
   let s;
   try {
@@ -318,6 +348,7 @@ async function load() {
     return;
   }
   meta.textContent = 'Today ' + esc(s.today) + ' · updated ' + esc(s.generated_at.slice(11,16));
+  orgTree.innerHTML = renderOrganisation(s.organisation || []);
   updateStore();
   let html = '';
   html += section('Overdue', s.overdue, taskLi, s.today);
