@@ -1,6 +1,6 @@
 # Command Centre — Next-Step Plan
 
-Status: Steps 1-4 COMPLETE and verified. Runtime PROD/DEV dashboard switching COMPLETE and verified. Step 5 deferred.
+Status: Steps 1-4 COMPLETE and verified. Runtime PROD/DEV dashboard switching COMPLETE and verified. Project due-date inheritance is the current approved implementation.
 
 ## Current state (updated 2026-10-12)
 

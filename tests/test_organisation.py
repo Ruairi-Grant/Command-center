@@ -20,16 +20,31 @@ def main():
         project = cc.create_goal("test", title="Data policy", kind="project",
                                 parent_id=area["id"],
                                 done_when="Governance approach is documented.",
-                                next_action="Review the data currently stored.")
+                                next_action="Review the data currently stored.",
+                                due="2026-12-31")
         task = cc.create_task("test", title="Review stored data", kind="task",
                               parent_id=project["id"], status="inbox")
+        explicit_task = cc.create_task("test", title="Deadline override", kind="task",
+                                       parent_id=project["id"], status="inbox",
+                                       due="2026-10-25")
         question = cc.create_task("test", title="Is Notion permitted?", kind="question",
                                   parent_id=project["id"], status="waiting",
                                   waiting_on="Data policy decision")
 
         assert area["kind"] == "area" and area["parent_id"] is None
         assert project["kind"] == "project" and project["parent_id"] == area["id"]
+        assert project["due"] == "2026-12-31"
         assert task["parent_id"] == project["id"] and task["status"] == "inbox"
+        state = cc.build_state()
+        tree_task = next(n for n in state["organisation"][0]["children"][0]["children"]
+                         if n["title"] == "Review stored data")
+        assert tree_task["due"] == "2026-12-31" and tree_task["due_source"] == "inherited"
+        tree_override = next(n for n in state["organisation"][0]["children"][0]["children"]
+                             if n["title"] == "Deadline override")
+        assert tree_override["due"] == "2026-10-25" and tree_override["due_source"] == "explicit"
+        state_task = next(t for t in state["no_date_tasks"] + state["upcoming_tasks"]
+                          if t["id"] == explicit_task["id"])
+        assert state_task["due"] == "2026-10-25" and state_task["due_source"] == "explicit"
         assert question["kind"] == "question" and question["waiting_on"] == "Data policy decision"
 
         try:

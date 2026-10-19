@@ -257,6 +257,7 @@ def validate_goal(rec, partial=False):
     out["done_when"] = _opt_str(rec, "done_when", 2000)
     out["next_action"] = _opt_str(rec, "next_action", 500)
     out["target"] = _opt_date(rec, "target")
+    out["due"] = _opt_date(rec, "due")
     out["notes"] = _opt_str(rec, "notes")
     na = rec.get("next_actions")
     if na is not None:
@@ -271,6 +272,7 @@ def validate_goal(rec, partial=False):
         out["done_when"] = out.get("done_when") or None
         out["next_action"] = out.get("next_action") or None
         out["target"] = out.get("target") or None
+        out["due"] = out.get("due") or None
     return out
 
 
@@ -783,7 +785,7 @@ def update_organisation(actor, rid, **patch):
     rec = _find(goals, rid)
     if rec is not None:
         allowed = {k: v for k, v in patch.items()
-                   if k in ("title", "status", "kind", "parent_id", "done_when", "next_action", "target", "notes")}
+                   if k in ("title", "status", "kind", "parent_id", "done_when", "next_action", "target", "due", "notes")}
         return update_goal(actor, rid, **allowed)
     rec = _find(tasks, rid)
     if rec is not None:
@@ -809,13 +811,48 @@ def due_on_or_before(t, day):
     return bool(d) and d <= day.isoformat()
 
 
+def _inherited_project_due(rec, records_by_id):
+    """Return the nearest ancestor project's due date, if any."""
+    seen = set()
+    parent_id = rec.get("parent_id")
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent = records_by_id.get(parent_id)
+        if parent is None:
+            break
+        if parent.get("kind") == "project" and parent.get("due"):
+            return parent["due"]
+        parent_id = parent.get("parent_id")
+    return None
+
+
+def _task_views_with_inherited_due(tasks, goals):
+    records_by_id = {r["id"]: r for r in goals + tasks}
+    views = []
+    for task in tasks:
+        view = dict(task)
+        if not view.get("due"):
+            inherited = _inherited_project_due(view, records_by_id)
+            if inherited:
+                view["due"] = inherited
+                view["due_source"] = "inherited"
+        else:
+            view["due_source"] = "explicit"
+        views.append(view)
+    return views
+
+
 def _organisation_tree(tasks, goals):
     records = [r for r in goals + tasks if r.get("kind")]
     by_parent = {}
     for rec in records:
         by_parent.setdefault(rec.get("parent_id"), []).append(rec)
 
-    def node(rec):
+    def node(rec, inherited_project_due=None):
+        own_due = rec.get("due")
+        project_due = own_due if rec.get("kind") == "project" and own_due else inherited_project_due
+        effective_due = own_due or inherited_project_due
+        due_source = "explicit" if own_due else ("inherited" if inherited_project_due else None)
         children = sorted(by_parent.get(rec.get("id"), []),
                           key=lambda x: (x.get("status") == "done", x.get("title", "").lower()))
         return {
@@ -824,12 +861,13 @@ def _organisation_tree(tasks, goals):
             "kind": rec.get("kind"),
             "status": rec.get("status"),
             "priority": rec.get("priority"),
-            "due": rec.get("due"),
+            "due": effective_due,
+            "due_source": due_source,
             "target": rec.get("target"),
             "next_action": rec.get("next_action"),
             "waiting_on": rec.get("waiting_on"),
             "done_when": rec.get("done_when"),
-            "children": [node(child) for child in children],
+            "children": [node(child, project_due) for child in children],
         }
 
     roots = sorted(by_parent.get(None, []), key=lambda x: x.get("title", "").lower())
@@ -847,12 +885,13 @@ def build_state(home=None):
     tasks = load_kind("tasks", home)
     commitments = load_kind("commitments", home)
     goals = load_kind("goals", home)
+    task_views = _task_views_with_inherited_due(tasks, goals)
 
     def sortkey(t):
         prio = {"high": 0, "normal": 1, "low": 2}.get(t.get("priority"), 1)
         return (t.get("due") or "9999-12-31", prio, t.get("title", ""))
 
-    active = sorted(open_tasks(tasks), key=sortkey)
+    active = sorted(open_tasks(task_views), key=sortkey)
     return {
         "generated_at": iso_now(),
         "today": day.isoformat(),

@@ -49,6 +49,8 @@ def main():
         assert 'Next action' not in html
         assert 'id="org-next"' not in html
         assert 'class="org-next"' not in html
+        assert 'id="org-due"' in html
+        assert 'due_source' in html
         print("ALL ORGANISATION UI TESTS PASSED")
         return 0
     finally:

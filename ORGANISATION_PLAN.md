@@ -51,7 +51,7 @@ The first migration preserves the existing store files for compatibility: contai
 Field rules:
 
 - `type`, `parent_id`, `title`, `status`, `priority`, `created`, and `updated` are always present.
-- `due` is a real commitment/deadline; `target` is an intended date and may be approximate. Do not invent dates.
+- `due` is an explicit project deadline or task deadline. A task without its own due date inherits the nearest ancestor project's due date for dashboard views and date filtering; inherited dates are marked as inherited and never written into the task record. `target` is an intended date and may be approximate. Do not invent dates.
 - `done_when` is required for projects and optional for goals/tasks.
 - `next_action` is required for active projects/goals and recommended for any item with children. It is the single best next physical action, not a vague aspiration.
 - `waiting_on` is used only when progress depends on a person/system/event; it should identify what is awaited and, when known, the follow-up date.
