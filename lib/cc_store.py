@@ -56,7 +56,7 @@ DEFAULT_HOME = os.path.dirname(_HERE)
 
 KINDS = ("tasks", "goals", "commitments")
 
-STATUSES = ("inbox", "next", "active", "waiting", "someday", "done", "cancelled")
+STATUSES = ("inbox", "active", "waiting", "someday", "done", "cancelled")
 PRIORITIES = ("high", "normal", "low")
 GOAL_STATUSES = ("active", "paused", "achieved", "dropped")
 WORK_KINDS = ("area", "goal", "project")
@@ -801,7 +801,7 @@ def today():
 
 def open_tasks(tasks=None):
     return [t for t in (tasks if tasks is not None else load_kind("tasks"))
-            if t.get("status") in ("inbox", "next", "active", "waiting") ]
+            if t.get("status") in ("inbox", "active", "waiting") ]
 
 
 def due_on_or_before(t, day):

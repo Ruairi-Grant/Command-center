@@ -206,15 +206,15 @@ PAGE = """<!doctype html>
   .stamp { font-size: 11px; color: #5c6478; }
   .organisation { margin: 18px 0 24px; }
   .organisation h2 { margin-top: 0; }
-  .org-tree { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 10px 14px; }
-  .org-node { margin: 5px 0; }
-  .org-node > summary { cursor: pointer; list-style-position: outside; }
+  .org-tree { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 20px; }
+  .org-node { margin: 10px 0; padding: 10px 12px; background: #1b202c; border: 1px solid #2b3344; border-radius: 8px; }
+  .org-node > summary { cursor: pointer; list-style-position: outside; padding: 3px 0; }
   .org-node > summary::marker { color: #68738a; }
-  .org-label { font-size: 14px; }
-  .org-kind, .org-status { font-size: 10px; margin-left: 7px; padding: 2px 6px; border-radius: 10px; color: #aeb7c9; background: #232a38; }
+  .org-label { font-size: 15px; }
+  .org-kind, .org-status { font-size: 11px; margin-left: 8px; padding: 3px 7px; border-radius: 10px; color: #aeb7c9; background: #2a3242; }
   .org-status.waiting { color: #f4c77f; }
-  .org-next, .org-waiting { margin: 4px 0 4px 20px; font-size: 12px; color: #8b93a5; }
-  .org-children { margin-left: 18px; }
+  .org-next, .org-waiting { margin: 8px 0 6px 22px; font-size: 13px; color: #a3adbf; }
+  .org-children { margin: 12px 0 0 20px; }
   .org-action { font-size: 10px; padding: 2px 6px; margin-left: 5px; }
   .org-editor { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
   .org-editor[hidden] { display: none; }
@@ -261,6 +261,10 @@ PAGE = """<!doctype html>
         <option value="low">Low</option>
       </select>
     </div>
+    <div class="field" style="flex:0 0 170px">
+      <label for="nt-parent">Parent</label>
+      <select id="nt-parent" name="parent_id"><option value="">No parent</option></select>
+    </div>
     <div class="field grow">
       <label for="nt-notes">Notes</label>
       <input id="nt-notes" name="notes" type="text" maxlength="2000" placeholder="Optional">
@@ -269,7 +273,7 @@ PAGE = """<!doctype html>
     <span class="hint">status defaults to inbox</span>
   </form>
   <section class="organisation" id="organisation">
-    <h2>Organisation <button class="org-action" id="org-add-root" type="button">Add area</button></h2>
+    <h2>Organisation</h2>
     <form class="org-editor" id="org-editor" hidden>
       <input id="org-id" type="hidden">
       <input id="org-parent" type="hidden">
@@ -289,6 +293,7 @@ PAGE = """<!doctype html>
 const app = document.getElementById('app');
 const list = document.getElementById('list');
 const form = document.getElementById('newtask');
+const ntParent = document.getElementById('nt-parent');
 const orgTree = document.getElementById('organisation-tree');
 const orgEditor = document.getElementById('org-editor');
 const orgId = document.getElementById('org-id');
@@ -351,7 +356,7 @@ function section(title, items, render, today) {
 function statusOptions(kind) {
   const values = ['area', 'goal', 'project'].includes(kind)
     ? ['active', 'paused', 'achieved', 'dropped']
-    : ['inbox', 'next', 'active', 'waiting', 'someday', 'done', 'cancelled'];
+    : ['inbox', 'active', 'waiting', 'someday', 'done', 'cancelled'];
   orgStatus.innerHTML = values.map(v => '<option value="' + v + '">' + v + '</option>').join('');
 }
 
@@ -363,7 +368,7 @@ function showOrganisationEditor(node, parentId) {
   orgKind.value = editing ? node.kind : (parentId ? 'task' : 'area');
   orgKind.disabled = editing;
   statusOptions(orgKind.value);
-  orgStatus.value = editing ? node.status : (['area', 'goal', 'project'].includes(orgKind.value) ? 'active' : 'next');
+  orgStatus.value = editing ? node.status : (['area', 'goal', 'project'].includes(orgKind.value) ? 'active' : 'inbox');
   orgNext.value = editing ? (node.next_action || '') : '';
   orgWaiting.value = editing ? (node.waiting_on || '') : '';
   orgEditor.hidden = false;
@@ -376,8 +381,7 @@ function closeOrganisationEditor() {
 }
 
 function orgControls(n) {
-  return '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
-    + '<button class="org-action" type="button" data-org-add="' + esc(n.id) + '">Add child</button>';
+  return '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>';
 }
 
 function renderOrganisation(organisation) {
@@ -395,6 +399,18 @@ function renderOrganisation(organisation) {
   return organisation.map(renderNode).join('') || '<div class="empty">No organisation items yet.</div>';
 }
 
+function populateParentOptions(organisation) {
+  const options = ['<option value="">No parent</option>'];
+  function walk(nodes, prefix) {
+    nodes.forEach(n => {
+      options.push('<option value="' + esc(n.id) + '">' + esc(prefix + n.title) + '</option>');
+      walk(n.children || [], prefix + '↳ ');
+    });
+  }
+  walk(organisation, '');
+  ntParent.innerHTML = options.join('');
+}
+
 function findOrganisationNode(nodes, id) {
   for (const n of nodes) {
     if (n.id === id) return n;
@@ -405,16 +421,11 @@ function findOrganisationNode(nodes, id) {
 }
 
 orgKind.addEventListener('change', () => statusOptions(orgKind.value));
-document.getElementById('org-add-root').addEventListener('click', () => showOrganisationEditor(null, null));
 orgTree.addEventListener('click', (ev) => {
   const edit = ev.target.closest('button[data-org-edit]');
-  const add = ev.target.closest('button[data-org-add]');
   if (edit) {
     ev.stopPropagation();
     showOrganisationEditor(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit), null);
-  } else if (add) {
-    ev.stopPropagation();
-    showOrganisationEditor(null, add.dataset.orgAdd);
   }
 });
 
@@ -453,13 +464,13 @@ async function load() {
   }
   meta.textContent = 'Today ' + esc(s.today) + ' · updated ' + esc(s.generated_at.slice(11,16));
   currentOrganisation = s.organisation || [];
+  populateParentOptions(currentOrganisation);
   orgTree.innerHTML = renderOrganisation(currentOrganisation);
   updateStore();
   let html = '';
   html += section('Overdue', s.overdue, taskLi, s.today);
   html += section('Due today', s.today_tasks, taskLi, s.today);
   html += section('Upcoming (7 days)', s.upcoming_tasks, taskLi, s.today);
-  html += section('No date', s.no_date_tasks, taskLi, s.today);
   html += section('Commitments overdue', s.commitments.overdue, commitLi, s.today);
   html += section('Commitments upcoming', s.commitments.upcoming, commitLi, s.today);
   html += section('Commitments no date', s.commitments.no_date, commitLi, s.today);
@@ -520,6 +531,7 @@ form.addEventListener('submit', async (ev) => {
     title: titleEl.value.trim(),
     due: document.getElementById('nt-due').value || undefined,
     priority: document.getElementById('nt-priority').value,
+    parent_id: ntParent.value || undefined,
     notes: document.getElementById('nt-notes').value.trim() || undefined,
   };
   if (!payload.title) { say('Title is required', true); return; }
@@ -718,7 +730,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 if self.path == "/api/tasks/create":
                     fields = {}
-                    for k in ("title", "notes", "priority", "due", "tags"):
+                    for k in ("title", "notes", "priority", "due", "tags", "parent_id"):
                         if k in body and body[k] not in (None, ""):
                             fields[k] = body[k]
                     # status is deliberately NOT accepted from the dashboard:

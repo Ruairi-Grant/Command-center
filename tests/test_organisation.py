@@ -22,14 +22,14 @@ def main():
                                 done_when="Governance approach is documented.",
                                 next_action="Review the data currently stored.")
         task = cc.create_task("test", title="Review stored data", kind="task",
-                              parent_id=project["id"], status="next")
+                              parent_id=project["id"], status="inbox")
         question = cc.create_task("test", title="Is Notion permitted?", kind="question",
                                   parent_id=project["id"], status="waiting",
                                   waiting_on="Data policy decision")
 
         assert area["kind"] == "area" and area["parent_id"] is None
         assert project["kind"] == "project" and project["parent_id"] == area["id"]
-        assert task["parent_id"] == project["id"] and task["status"] == "next"
+        assert task["parent_id"] == project["id"] and task["status"] == "inbox"
         assert question["kind"] == "question" and question["waiting_on"] == "Data policy decision"
 
         try:

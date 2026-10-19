@@ -1,6 +1,6 @@
 # Command Centre Organisation Plan
 
-Status: design approved; hierarchical model implemented and imported into DEV; dashboard tree UI remains the next phase
+Status: design approved; hierarchical model implemented and imported into DEV; editable dashboard UI implemented
 
 ## Design goal
 
@@ -61,12 +61,13 @@ Field rules:
 ### Statuses
 
 - `inbox`: captured but not classified or planned.
-- `next`: ready to act; the next action is known.
 - `active`: currently being worked on.
 - `waiting`: blocked by an external person/event or an unanswered question.
 - `someday`: intentionally deferred, with no active commitment.
 - `done`: completed and retained for history.
 - `cancelled`: intentionally abandoned.
+
+There is no ordered `next` status; ordering is deliberately not implied by the tree.
 
 Only `task`, `question`, and `milestone` should normally appear in the actionable queue. Goals and projects appear there only through their `next_action` when they have no ready child.
 
@@ -85,7 +86,7 @@ Keep commitments separate from work items because they represent promises to ano
 - `UAA` becomes an area. `Stripe setup`, `Applications`, `Name change`, `Messaging change`, `Marketing`, `Honorary alumni`, and `Data policy` become projects. Their bullets become child tasks or questions; `Remaining open questions` is a question-collection project only if it needs its own review cadence.
 - `Flights to Dublin for Christmas`, `Flights to Edinburgh`, `Plan for bike in Dublin`, and `Buy one of the BCG case books` are standalone tasks initially. They can later be moved under a travel or personal-development project without changing their IDs.
 
-No dates, owners, priorities, or statuses should be inferred from the note. Where the note gives no due date, retain `due: null` and use `next` only when the item is genuinely ready to act.
+No dates, owners, priorities, or statuses should be inferred from the note. Where the note gives no due date, retain `due: null` and use `inbox` until the user deliberately classifies it.
 
 ## Agent decision rules
 
@@ -106,7 +107,7 @@ No dates, owners, priorities, or statuses should be inferred from the note. Wher
 - Each project/goal shows one prominent `Next action` line and a child count.
 - Add-child action is available on every goal/project/task with an explicit confirmation of the parent path.
 - Inbox view shows uncategorised captures separately from planned work.
-- Ready view shows unblocked `next` tasks ordered by due date, priority, age, and parent context.
+- Ready view shows unblocked `inbox` and `active` tasks ordered by due date, priority, age, and parent context.
 - Waiting view shows the dependency and follow-up date.
 - A compact capture form should accept a title first, then offer parent/type/status as optional fields so capture remains as quick as the notes app.
 - Search results should show the full breadcrumb, type, status, next action, and due date.

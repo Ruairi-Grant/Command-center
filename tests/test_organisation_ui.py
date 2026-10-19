@@ -42,8 +42,10 @@ def main():
         with urllib.request.urlopen(BASE + "/", timeout=10) as response:
             html = response.read().decode()
         assert 'id="organisation"' in html
-        assert "renderOrganisation" in html
-        assert "organisation.map" in html
+        assert 'id="nt-parent"' in html
+        assert 'data-org-add' not in html
+        assert "section('No date'" not in html
+        assert "'next'" not in html
         print("ALL ORGANISATION UI TESTS PASSED")
         return 0
     finally:
