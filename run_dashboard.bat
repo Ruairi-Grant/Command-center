@@ -16,7 +16,7 @@ set "PYEXE=C:\Users\ruair\AppData\Local\hermes\tools\python-3.14.7+202****0901-w
 set "LOG_DIR=%PROJECT_DIR%logs"
 set "LOG_FILE=%LOG_DIR%\dashboard.log"
 set "LOG_MAX=5242880"
-if not defined CC_HOME set "CC_HOME=%PROJECT_DIR%..\command-center-prod"
+if not defined CC_HOME set "CC_HOME=%PROJECT_DIR%command-center-prod"
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 

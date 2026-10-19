@@ -92,9 +92,9 @@ From your phone (optional, via Tailscale):
   IP — still works as a fallback.)
 
 The dashboard supports a runtime-only data-store switch. The launcher
-sets `CC_HOME` to the sibling `command-center-prod` directory by default;
+sets `CC_HOME` to the contained `command-center-prod` directory by default;
 the page header shows `STORE: PROD` or `STORE: DEV` and the button switches
-between `command-center-prod` and `command-center-dev`. The selection is
+between the contained `command-center-prod` and `command-center-dev` stores. The selection is
 held only in the running process and resets to PROD after a restart. All
 writes continue through `cc_store`; arbitrary filesystem paths are never
 accepted.

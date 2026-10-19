@@ -88,7 +88,7 @@ STORE_NAMES = ("prod", "dev")
 
 
 def _configured_home():
-    return os.environ.get("CC_HOME", DEFAULT_HOME)
+    return os.environ.get("CC_HOME", os.path.join(DEFAULT_HOME, "command-center-prod"))
 
 
 def _named_store_home(name):

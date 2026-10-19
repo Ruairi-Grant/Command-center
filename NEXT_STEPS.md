@@ -5,8 +5,8 @@ Status: Steps 1-4 COMPLETE and verified. Runtime PROD/DEV dashboard switching CO
 ## Current state (updated 2026-10-12)
 
 - Steps 1-4 of the original plan are DONE and verified.
-- The store currently holds TEST records plus real tasks added during
-  verification (e.g. "TEST - chat-to-store verification"). No production
+- `command-center-prod` and `command-center-dev` are contained inside the
+  repository directory and hold the operational stores. No production
   migration of records has been performed.
 - The command-centre skill is installed
   (~/AppData/Local/hermes/skills/command-centre/SKILL.md).

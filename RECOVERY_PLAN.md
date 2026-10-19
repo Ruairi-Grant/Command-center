@@ -9,7 +9,9 @@ Status: implemented and verified
 - Unstaged changes add partial runtime-store support to `lib/cc_store.py`, an incomplete `/api/store/switch` branch to `lib/cc_dashboard.py`, and a PROD default in `run_dashboard.bat`.
 - The dashboard HTML currently has no store badge or switch button/handler.
 - The current test run passes `test_cc.py` and `test_backups.py`, then fails in `test_dashboard.py` when the exact MagicDNS host is rejected (403 instead of 201). Frontend tests were not reached in that chained run.
-- `command-center-prod` and `command-center-dev` exist as sibling directories. Both currently contain empty JSONL files; the dev directory also contains lock files. No production records were found in either sibling store during inspection. The repository's own `data/` files are also empty.
+- `command-center-prod` and `command-center-dev` are contained inside the
+  repository directory and hold the operational stores. No production
+  migration of records has been performed.
 - Untracked scratch files remain in the repository: `_apply_switch.py`, `_clean_dashboard.py`, `_probe_init_prod.py`, `_probe_store.py`, and `CURRENT_STATE_RECAP.md`.
 
 ## Recovery approach
