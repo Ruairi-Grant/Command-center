@@ -131,6 +131,7 @@ python tests/test_dashboard_frontend.py  # dashboard page wiring
 python tests/test_dashboard_store_switch.py  # isolated PROD/DEV switching
 python tests/test_organisation.py          # hierarchy and parent validation
 python tests/test_organisation_ui.py       # organisation API and tree UI
+python tests/test_organisation_edit.py    # create/update organisation records
 ```
 
 ## Security model (read this)

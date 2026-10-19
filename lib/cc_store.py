@@ -766,6 +766,33 @@ def complete_commitment(actor, rid):
     return rec
 
 
+def create_organisation(actor, **fields):
+    kind = fields.get("kind")
+    if kind in WORK_KINDS:
+        return create_goal(actor, **fields)
+    if kind in TASK_KINDS:
+        return create_task(actor, **fields)
+    raise CCError("field 'kind' must be one of area/goal/project/task/question/milestone")
+
+
+def update_organisation(actor, rid, **patch):
+    _check_id(rid)
+    home = get_home()
+    goals = load_kind("goals", home)
+    tasks = load_kind("tasks", home)
+    rec = _find(goals, rid)
+    if rec is not None:
+        allowed = {k: v for k, v in patch.items()
+                   if k in ("title", "status", "kind", "parent_id", "done_when", "next_action", "target", "notes")}
+        return update_goal(actor, rid, **allowed)
+    rec = _find(tasks, rid)
+    if rec is not None:
+        allowed = {k: v for k, v in patch.items()
+                   if k in ("title", "status", "kind", "parent_id", "waiting_on", "done_when", "next_action", "notes", "due", "priority")}
+        return update_task(actor, rid, **allowed)
+    raise CCError("organisation item %s not found" % rid)
+
+
 # ---------------------------------------------------------------- views
 
 def today():

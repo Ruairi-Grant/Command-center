@@ -215,6 +215,12 @@ PAGE = """<!doctype html>
   .org-status.waiting { color: #f4c77f; }
   .org-next, .org-waiting { margin: 4px 0 4px 20px; font-size: 12px; color: #8b93a5; }
   .org-children { margin-left: 18px; }
+  .org-action { font-size: 10px; padding: 2px 6px; margin-left: 5px; }
+  .org-editor { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .org-editor[hidden] { display: none; }
+  .org-editor label { font-size: 11px; color: #8b93a5; display: flex; flex-direction: column; gap: 3px; }
+  .org-editor input, .org-editor select { font: inherit; font-size: 13px; padding: 6px; border-radius: 6px; border: 1px solid #333c4e; background: #1d2330; color: #e6e8ee; }
+  .org-editor .org-editor-actions { display: flex; gap: 8px; align-items: end; }
   form.newtask { background: #161a24; border: 1px solid #262c3a; border-radius: 10px;
                  padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   form.newtask .field { display: flex; flex-direction: column; gap: 4px; }
@@ -263,7 +269,17 @@ PAGE = """<!doctype html>
     <span class="hint">status defaults to inbox</span>
   </form>
   <section class="organisation" id="organisation">
-    <h2>Organisation</h2>
+    <h2>Organisation <button class="org-action" id="org-add-root" type="button">Add area</button></h2>
+    <form class="org-editor" id="org-editor" hidden>
+      <input id="org-id" type="hidden">
+      <input id="org-parent" type="hidden">
+      <label>Title<input id="org-title" required maxlength="500"></label>
+      <label>Type<select id="org-kind"><option value="area">Area</option><option value="goal">Goal</option><option value="project">Project</option><option value="task">Task</option><option value="question">Question</option><option value="milestone">Milestone</option></select></label>
+      <label>Status<select id="org-status"></select></label>
+      <label>Next action<input id="org-next"></label>
+      <label>Waiting on<input id="org-waiting"></label>
+      <div class="org-editor-actions"><button type="submit">Save</button><button id="org-cancel" type="button">Cancel</button></div>
+    </form>
     <div class="org-tree" id="organisation-tree"><div class="empty">Loading…</div></div>
   </section>
   <div id="list"><div class="empty">Loading…</div></div>
@@ -274,10 +290,19 @@ const app = document.getElementById('app');
 const list = document.getElementById('list');
 const form = document.getElementById('newtask');
 const orgTree = document.getElementById('organisation-tree');
+const orgEditor = document.getElementById('org-editor');
+const orgId = document.getElementById('org-id');
+const orgParent = document.getElementById('org-parent');
+const orgTitle = document.getElementById('org-title');
+const orgKind = document.getElementById('org-kind');
+const orgStatus = document.getElementById('org-status');
+const orgNext = document.getElementById('org-next');
+const orgWaiting = document.getElementById('org-waiting');
 const meta = document.getElementById('meta');
 const store = document.getElementById('store');
 const toast = document.getElementById('toast');
 let toastTimer;
+let currentOrganisation = [];
 
 function say(msg, isErr) {
   toast.textContent = msg;
@@ -323,11 +348,44 @@ function section(title, items, render, today) {
   return html;
 }
 
+function statusOptions(kind) {
+  const values = ['area', 'goal', 'project'].includes(kind)
+    ? ['active', 'paused', 'achieved', 'dropped']
+    : ['inbox', 'next', 'active', 'waiting', 'someday', 'done', 'cancelled'];
+  orgStatus.innerHTML = values.map(v => '<option value="' + v + '">' + v + '</option>').join('');
+}
+
+function showOrganisationEditor(node, parentId) {
+  const editing = Boolean(node);
+  orgId.value = editing ? node.id : '';
+  orgParent.value = parentId || (editing ? '' : '');
+  orgTitle.value = editing ? node.title : '';
+  orgKind.value = editing ? node.kind : (parentId ? 'task' : 'area');
+  orgKind.disabled = editing;
+  statusOptions(orgKind.value);
+  orgStatus.value = editing ? node.status : (['area', 'goal', 'project'].includes(orgKind.value) ? 'active' : 'next');
+  orgNext.value = editing ? (node.next_action || '') : '';
+  orgWaiting.value = editing ? (node.waiting_on || '') : '';
+  orgEditor.hidden = false;
+  orgTitle.focus();
+}
+
+function closeOrganisationEditor() {
+  orgEditor.hidden = true;
+  orgKind.disabled = false;
+}
+
+function orgControls(n) {
+  return '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
+    + '<button class="org-action" type="button" data-org-add="' + esc(n.id) + '">Add child</button>';
+}
+
 function renderOrganisation(organisation) {
   function renderNode(n) {
     const label = '<span class="org-label">' + esc(n.title) + '</span>'
       + '<span class="org-kind">' + esc(n.kind) + '</span>'
-      + '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>';
+      + '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>'
+      + orgControls(n);
     const details = (n.next_action ? '<div class="org-next">Next: ' + esc(n.next_action) + '</div>' : '')
       + (n.waiting_on ? '<div class="org-waiting">Waiting on: ' + esc(n.waiting_on) + '</div>' : '');
     if (!n.children.length) return '<div class="org-node">' + label + details + '</div>';
@@ -336,6 +394,52 @@ function renderOrganisation(organisation) {
   }
   return organisation.map(renderNode).join('') || '<div class="empty">No organisation items yet.</div>';
 }
+
+function findOrganisationNode(nodes, id) {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    const found = findOrganisationNode(n.children || [], id);
+    if (found) return found;
+  }
+  return null;
+}
+
+orgKind.addEventListener('change', () => statusOptions(orgKind.value));
+document.getElementById('org-add-root').addEventListener('click', () => showOrganisationEditor(null, null));
+orgTree.addEventListener('click', (ev) => {
+  const edit = ev.target.closest('button[data-org-edit]');
+  const add = ev.target.closest('button[data-org-add]');
+  if (edit) {
+    ev.stopPropagation();
+    showOrganisationEditor(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit), null);
+  } else if (add) {
+    ev.stopPropagation();
+    showOrganisationEditor(null, add.dataset.orgAdd);
+  }
+});
+
+document.getElementById('org-cancel').addEventListener('click', closeOrganisationEditor);
+orgEditor.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const editing = Boolean(orgId.value);
+  const body = {
+    title: orgTitle.value.trim(), status: orgStatus.value,
+    next_action: orgNext.value.trim() || null,
+    waiting_on: orgWaiting.value.trim() || null,
+  };
+  if (!body.title) { say('Title is required', true); return; }
+  const url = editing ? '/api/organisation/update' : '/api/organisation/create';
+  if (editing) body.id = orgId.value;
+  else { body.kind = orgKind.value; body.parent_id = orgParent.value || null; }
+  try {
+    const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    closeOrganisationEditor();
+    say(editing ? 'Updated' : 'Added');
+    load();
+  } catch (e) { say('Save failed: ' + e.message, true); }
+});
 
 async function load() {
   let s;
@@ -348,7 +452,8 @@ async function load() {
     return;
   }
   meta.textContent = 'Today ' + esc(s.today) + ' · updated ' + esc(s.generated_at.slice(11,16));
-  orgTree.innerHTML = renderOrganisation(s.organisation || []);
+  currentOrganisation = s.organisation || [];
+  orgTree.innerHTML = renderOrganisation(currentOrganisation);
   updateStore();
   let html = '';
   html += section('Overdue', s.overdue, taskLi, s.today);
@@ -591,6 +696,26 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "invalid JSON body"}, 400)
                 return
             try:
+                if self.path == "/api/organisation/create":
+                    fields = {k: body[k] for k in (
+                        "title", "kind", "parent_id", "status", "priority",
+                        "next_action", "done_when", "waiting_on", "notes", "due", "target"
+                    ) if k in body}
+                    rec = cc.create_organisation("dashboard", **fields)
+                    self._send_json({"ok": True, "record": rec}, 201)
+                    return
+                if self.path == "/api/organisation/update":
+                    rid = body.get("id")
+                    if not isinstance(rid, str):
+                        self._send_json({"error": "missing id"}, 400)
+                        return
+                    fields = {k: body[k] for k in (
+                        "title", "kind", "parent_id", "status", "priority",
+                        "next_action", "done_when", "waiting_on", "notes", "due", "target"
+                    ) if k in body}
+                    rec = cc.update_organisation("dashboard", rid, **fields)
+                    self._send_json({"ok": True, "record": rec})
+                    return
                 if self.path == "/api/tasks/create":
                     fields = {}
                     for k in ("title", "notes", "priority", "due", "tags"):
