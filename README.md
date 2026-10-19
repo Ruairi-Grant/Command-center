@@ -129,6 +129,7 @@ python tests/test_backups.py             # backups: retention, restore, races
 python tests/test_dashboard.py           # dashboard API: endpoints, Host/Origin, errors
 python tests/test_dashboard_frontend.py  # dashboard page wiring
 python tests/test_dashboard_store_switch.py  # isolated PROD/DEV switching
+python tests/test_organisation.py          # hierarchy and parent validation
 ```
 
 ## Security model (read this)

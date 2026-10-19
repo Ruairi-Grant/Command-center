@@ -1,6 +1,6 @@
 # Command Centre Organisation Plan
 
-Status: design only; no notes have been imported
+Status: design approved; hierarchical model implemented and imported into DEV; dashboard tree UI remains the next phase
 
 ## Design goal
 
@@ -20,6 +20,10 @@ Use one tree of `work_items` plus a separate `commitments` collection.
 - `milestone`: an important checkpoint inside a project, used only when it helps planning. Avoid creating milestones for every ordinary task.
 
 A work item has one `parent_id`, forming a tree. Children are records, not embedded arrays, so an agent can query, reorder, complete, or add subtasks without rewriting a parent. Areas are roots; goals and projects sit below areas; tasks/questions/milestones sit below a goal or project. A task may itself have children when the work genuinely decomposes further.
+
+### Current DEV implementation
+
+The first migration preserves the existing store files for compatibility: container nodes (`area`, `goal`, `project`) are stored in `goals.jsonl`, and leaf nodes (`task`, `question`, `milestone`) are stored in `tasks.jsonl`. Both use `parent_id`; legacy test records without the new fields remain readable. The store validates parent existence, supports `next` and `someday` task statuses, and stores `done_when`, `next_action`, `waiting_on`, and `target` where applicable. PROD was not modified.
 
 ### Required fields
 

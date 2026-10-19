@@ -56,9 +56,11 @@ DEFAULT_HOME = os.path.dirname(_HERE)
 
 KINDS = ("tasks", "goals", "commitments")
 
-STATUSES = ("inbox", "active", "waiting", "done", "cancelled")
+STATUSES = ("inbox", "next", "active", "waiting", "someday", "done", "cancelled")
 PRIORITIES = ("high", "normal", "low")
 GOAL_STATUSES = ("active", "paused", "achieved", "dropped")
+WORK_KINDS = ("area", "goal", "project")
+TASK_KINDS = ("task", "question", "milestone")
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ID_RE = re.compile(r"^\d{8}-[0-9a-f]{6}$")
@@ -208,6 +210,14 @@ def validate_task(rec, partial=False):
     out["due"] = _opt_date(rec, "due")
     out["status"] = _opt_choice(rec, "status", STATUSES)
     out["priority"] = _opt_choice(rec, "priority", PRIORITIES)
+    out["kind"] = _opt_choice(rec, "kind", TASK_KINDS)
+    parent_id = rec.get("parent_id")
+    if parent_id is not None:
+        _check_id(parent_id)
+        out["parent_id"] = parent_id
+    out["waiting_on"] = _opt_str(rec, "waiting_on", 1000)
+    out["done_when"] = _opt_str(rec, "done_when", 2000)
+    out["next_action"] = _opt_str(rec, "next_action", 500)
     gid = rec.get("goal_id")
     if gid:
         out["goal_id"] = str(gid)
@@ -223,6 +233,11 @@ def validate_task(rec, partial=False):
         out["due"] = out.get("due") or None
         out["priority"] = out.get("priority") or "normal"
         out["status"] = out.get("status") or "inbox"
+        out["kind"] = out.get("kind") or "task"
+        out["parent_id"] = out.get("parent_id") or None
+        out["waiting_on"] = out.get("waiting_on") or None
+        out["done_when"] = out.get("done_when") or None
+        out["next_action"] = out.get("next_action") or None
         out["tags"] = out.get("tags") or []
     return out
 
@@ -234,6 +249,14 @@ def validate_goal(rec, partial=False):
     if not partial or "title" in rec:
         out["title"] = _require_str(rec, "title")
     out["status"] = _opt_choice(rec, "status", GOAL_STATUSES)
+    out["kind"] = _opt_choice(rec, "kind", WORK_KINDS)
+    parent_id = rec.get("parent_id")
+    if parent_id is not None:
+        _check_id(parent_id)
+        out["parent_id"] = parent_id
+    out["done_when"] = _opt_str(rec, "done_when", 2000)
+    out["next_action"] = _opt_str(rec, "next_action", 500)
+    out["target"] = _opt_date(rec, "target")
     out["notes"] = _opt_str(rec, "notes")
     na = rec.get("next_actions")
     if na is not None:
@@ -242,6 +265,12 @@ def validate_goal(rec, partial=False):
         out["next_actions"] = na
     if not partial and "id" in rec:
         _check_id(rec["id"])
+    if not partial:
+        out["kind"] = out.get("kind") or "goal"
+        out["parent_id"] = out.get("parent_id") or None
+        out["done_when"] = out.get("done_when") or None
+        out["next_action"] = out.get("next_action") or None
+        out["target"] = out.get("target") or None
     return out
 
 
@@ -614,9 +643,20 @@ def _find(records, rid):
     return None
 
 
+def _require_parent_exists(parent_id, home):
+    if parent_id is None:
+        return
+    if _find(load_kind("goals", home), parent_id) is not None:
+        return
+    if _find(load_kind("tasks", home), parent_id) is not None:
+        return
+    raise CCError("parent %s not found" % parent_id)
+
+
 def create_task(actor, **fields):
     home = get_home()
     rec = validate_task(fields)
+    _require_parent_exists(rec.get("parent_id"), home)
     rec["id"] = new_id()
     rec["status"] = rec.get("status") or "inbox"
     rec["priority"] = rec.get("priority") or "normal"
@@ -636,6 +676,8 @@ def update_task(actor, rid, **patch):
     clean = validate_task(patch, partial=True)
     clean.pop("id", None)
     home = get_home()
+    if "parent_id" in clean:
+        _require_parent_exists(clean["parent_id"], home)
     with mutation(actor, "task.update", "task:" + rid, home):
         records = load_kind("tasks", home)
         rec = _find(records, rid)
@@ -666,7 +708,9 @@ def complete_task(actor, rid):
 def create_goal(actor, **fields):
     home = get_home()
     rec = validate_goal(fields)
+    _require_parent_exists(rec.get("parent_id"), home)
     rec["id"] = new_id()
+    rec["kind"] = rec.get("kind") or "goal"
     rec["status"] = rec.get("status") or "active"
     rec.setdefault("next_actions", [])
     rec["created"] = iso_now()
@@ -682,6 +726,8 @@ def update_goal(actor, rid, **patch):
     clean = validate_goal(patch, partial=True)
     clean.pop("id", None)
     home = get_home()
+    if "parent_id" in clean:
+        _require_parent_exists(clean["parent_id"], home)
     with mutation(actor, "goal.update", "goal:" + rid, home):
         records = load_kind("goals", home)
         rec = _find(records, rid)
@@ -728,7 +774,7 @@ def today():
 
 def open_tasks(tasks=None):
     return [t for t in (tasks if tasks is not None else load_kind("tasks"))
-            if t.get("status") in ("inbox", "active", "waiting")]
+            if t.get("status") in ("inbox", "next", "active", "waiting") ]
 
 
 def due_on_or_before(t, day):
