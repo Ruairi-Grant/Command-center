@@ -46,6 +46,9 @@ def main():
         assert 'data-org-add' not in html
         assert "section('No date'" not in html
         assert "'next'" not in html
+        assert 'Next action' not in html
+        assert 'id="org-next"' not in html
+        assert 'class="org-next"' not in html
         print("ALL ORGANISATION UI TESTS PASSED")
         return 0
     finally:

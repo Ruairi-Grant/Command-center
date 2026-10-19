@@ -213,7 +213,7 @@ PAGE = """<!doctype html>
   .org-label { font-size: 15px; }
   .org-kind, .org-status { font-size: 11px; margin-left: 8px; padding: 3px 7px; border-radius: 10px; color: #aeb7c9; background: #2a3242; }
   .org-status.waiting { color: #f4c77f; }
-  .org-next, .org-waiting { margin: 8px 0 6px 22px; font-size: 13px; color: #a3adbf; }
+  .org-waiting { margin: 8px 0 6px 22px; font-size: 13px; color: #a3adbf; }
   .org-children { margin: 12px 0 0 20px; }
   .org-action { font-size: 10px; padding: 2px 6px; margin-left: 5px; }
   .org-editor { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
@@ -280,7 +280,6 @@ PAGE = """<!doctype html>
       <label>Title<input id="org-title" required maxlength="500"></label>
       <label>Type<select id="org-kind"><option value="area">Area</option><option value="goal">Goal</option><option value="project">Project</option><option value="task">Task</option><option value="question">Question</option><option value="milestone">Milestone</option></select></label>
       <label>Status<select id="org-status"></select></label>
-      <label>Next action<input id="org-next"></label>
       <label>Waiting on<input id="org-waiting"></label>
       <div class="org-editor-actions"><button type="submit">Save</button><button id="org-cancel" type="button">Cancel</button></div>
     </form>
@@ -301,7 +300,6 @@ const orgParent = document.getElementById('org-parent');
 const orgTitle = document.getElementById('org-title');
 const orgKind = document.getElementById('org-kind');
 const orgStatus = document.getElementById('org-status');
-const orgNext = document.getElementById('org-next');
 const orgWaiting = document.getElementById('org-waiting');
 const meta = document.getElementById('meta');
 const store = document.getElementById('store');
@@ -369,7 +367,6 @@ function showOrganisationEditor(node, parentId) {
   orgKind.disabled = editing;
   statusOptions(orgKind.value);
   orgStatus.value = editing ? node.status : (['area', 'goal', 'project'].includes(orgKind.value) ? 'active' : 'inbox');
-  orgNext.value = editing ? (node.next_action || '') : '';
   orgWaiting.value = editing ? (node.waiting_on || '') : '';
   orgEditor.hidden = false;
   orgTitle.focus();
@@ -390,8 +387,7 @@ function renderOrganisation(organisation) {
       + '<span class="org-kind">' + esc(n.kind) + '</span>'
       + '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>'
       + orgControls(n);
-    const details = (n.next_action ? '<div class="org-next">Next: ' + esc(n.next_action) + '</div>' : '')
-      + (n.waiting_on ? '<div class="org-waiting">Waiting on: ' + esc(n.waiting_on) + '</div>' : '');
+    const details = n.waiting_on ? '<div class="org-waiting">Waiting on: ' + esc(n.waiting_on) + '</div>' : '';
     if (!n.children.length) return '<div class="org-node">' + label + details + '</div>';
     return '<details class="org-node" open><summary>' + label + '</summary>'
       + details + '<div class="org-children">' + n.children.map(renderNode).join('') + '</div></details>';
@@ -435,7 +431,6 @@ orgEditor.addEventListener('submit', async (ev) => {
   const editing = Boolean(orgId.value);
   const body = {
     title: orgTitle.value.trim(), status: orgStatus.value,
-    next_action: orgNext.value.trim() || null,
     waiting_on: orgWaiting.value.trim() || null,
   };
   if (!body.title) { say('Title is required', true); return; }
