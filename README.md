@@ -37,7 +37,11 @@ Two independent components share one write layer:
   activity log.
 - `lib/cc_dashboard.py` — a standalone stdlib HTTP server. It never
   touches the data files directly; it calls `cc_store`. It exposes only a
-  handful of explicit operations (no shell, no arbitrary file access).
+  handful of explicit operations (no shell, no arbitrary file access),
+  including the runtime-only PROD/DEV store switch.
+- `tests/test_cc.py`, `test_backups.py`, `test_dashboard.py`,
+  `test_dashboard_frontend.py`, and `test_dashboard_store_switch.py` cover
+  the store, dashboard, frontend wiring, and isolated store switching.
 
 The Hermes `command-centre` skill (installed separately) drives the same
 `cc_store` layer from chat, so capturing a task in conversation and
@@ -87,6 +91,14 @@ From your phone (optional, via Tailscale):
   (If you ever re-enable it, `https://100.104.50.68` — the PC's tailnet
   IP — still works as a fallback.)
 
+The dashboard supports a runtime-only data-store switch. The launcher
+sets `CC_HOME` to the sibling `command-center-prod` directory by default;
+the page header shows `STORE: PROD` or `STORE: DEV` and the button switches
+between `command-center-prod` and `command-center-dev`. The selection is
+held only in the running process and resets to PROD after a restart. All
+writes continue through `cc_store`; arbitrary filesystem paths are never
+accepted.
+
 ## Using the store from the command line
 
 ```
@@ -116,6 +128,7 @@ python tests/test_cc.py                  # store: validation, concurrency, durab
 python tests/test_backups.py             # backups: retention, restore, races
 python tests/test_dashboard.py           # dashboard API: endpoints, Host/Origin, errors
 python tests/test_dashboard_frontend.py  # dashboard page wiring
+python tests/test_dashboard_store_switch.py  # isolated PROD/DEV switching
 ```
 
 ## Security model (read this)

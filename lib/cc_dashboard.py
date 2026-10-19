@@ -166,6 +166,9 @@ PAGE = """<!doctype html>
            display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
   header h1 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: .3px; }
   header .meta { font-size: 12px; color: #8b93a5; }
+  header .store { margin-left: auto; font-weight: 700; }
+  header .store.prod { color: #7fd6a4; }
+  header .store.dev { color: #f4c77f; }
   main { padding: 18px 20px 40px; max-width: 980px; margin: 0 auto; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px;
        color: #8b93a5; margin: 26px 0 10px; font-weight: 600; }
@@ -220,6 +223,7 @@ PAGE = """<!doctype html>
 <header>
   <h1>Command Centre</h1>
   <span class="meta" id="meta">loading…</span>
+  <button class="store" id="store" type="button" title="Switch data store">STORE: loading…</button>
 </header>
 <main id="app">
   <form class="newtask" id="newtask" autocomplete="off">
@@ -255,6 +259,7 @@ const app = document.getElementById('app');
 const list = document.getElementById('list');
 const form = document.getElementById('newtask');
 const meta = document.getElementById('meta');
+const store = document.getElementById('store');
 const toast = document.getElementById('toast');
 let toastTimer;
 
@@ -313,6 +318,7 @@ async function load() {
     return;
   }
   meta.textContent = 'Today ' + esc(s.today) + ' · updated ' + esc(s.generated_at.slice(11,16));
+  updateStore();
   let html = '';
   html += section('Overdue', s.overdue, taskLi, s.today);
   html += section('Due today', s.today_tasks, taskLi, s.today);
@@ -333,6 +339,42 @@ async function load() {
   html += '</div>';
   list.innerHTML = html;   // render into #list, never clobber the form
 }
+
+async function updateStore() {
+  try {
+    const r = await fetch('/api/store/switch');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const name = String(j.store || '').toUpperCase();
+    store.textContent = 'STORE: ' + name;
+    store.className = 'store ' + String(j.store || '').toLowerCase();
+    store.dataset.store = String(j.store || '').toLowerCase();
+  } catch (e) {
+    store.textContent = 'STORE: unavailable';
+    store.className = 'store';
+  }
+}
+
+store.addEventListener('click', async () => {
+  const current = store.dataset.store;
+  const next = current === 'dev' ? 'prod' : 'dev';
+  store.disabled = true;
+  try {
+    const r = await fetch('/api/store/switch', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({store: next}),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    await updateStore();
+    await load();
+    say('Switched to ' + next.toUpperCase());
+  } catch (e) {
+    say('Store switch failed: ' + e.message, true);
+  } finally {
+    store.disabled = false;
+  }
+});
 
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -479,6 +521,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.path in ("/", "/index.html"):
                 self._send_html(PAGE)
+            elif self.path == "/api/store/switch":
+                self._send_json({"store": cc.current_store_name()})
             elif self.path.startswith("/api/state"):
                 try:
                     self._send_json(cc.build_state())
@@ -497,6 +541,19 @@ class Handler(BaseHTTPRequestHandler):
         # filesystem access, no Hermes tools. All writes go through cc_store.
         try:
             if not self._guard():
+                return
+            if self.path == "/api/store/switch":
+                body = self._read_json()
+                if not isinstance(body, dict):
+                    self._send_json({"error": "invalid JSON body"}, 400)
+                    return
+                name = body.get("store")
+                if not isinstance(name, str) or name not in cc.STORE_NAMES:
+                    self._send_json({"error": "store must be 'prod' or 'dev'"}, 400)
+                    return
+                cc.set_store(name)
+                cc.init()
+                self._send_json({"ok": True, "store": cc.current_store_name()})
                 return
             body = self._read_json()
             if not isinstance(body, dict):

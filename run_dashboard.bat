@@ -9,10 +9,14 @@ REM This does NOT change the dashboard bind (127.0.0.1) or any config.
 setlocal enabledelayedexpansion
 
 set "PROJECT_DIR=%~dp0"
+
+REM The scheduled task always boots on PROD. The runtime UI switch is
+REM temporary and is not persisted.
 set "PYEXE=C:\Users\ruair\AppData\Local\hermes\tools\python-3.14.7+202****0901-win32-x64\python.exe"
 set "LOG_DIR=%PROJECT_DIR%logs"
 set "LOG_FILE=%LOG_DIR%\dashboard.log"
 set "LOG_MAX=5242880"
+if not defined CC_HOME set "CC_HOME=%PROJECT_DIR%..\command-center-prod"
 
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 

@@ -78,7 +78,53 @@ def iso_now():
 
 # ---------------------------------------------------------------- paths
 
+# Runtime store override, set via the dashboard's store-switch endpoint.
+# Deliberately NOT persisted: a reboot returns to CC_HOME (prod), so you
+# can never accidentally leave the live dashboard pointing at dev. Only
+# the exact names "prod" and "dev" are accepted; the override resolves to
+# a sibling directory, never an arbitrary path.
+STORE_OVERRIDE = {"home": None}
+STORE_NAMES = ("prod", "dev")
+
+
+def _configured_home():
+    return os.environ.get("CC_HOME", DEFAULT_HOME)
+
+
+def _named_store_home(name):
+    """Resolve a named sibling store from the configured PROD home."""
+    configured = os.path.normpath(_configured_home())
+    parent = os.path.dirname(configured)
+    return os.path.join(parent, "command-center-%s" % name)
+
+
+def set_store(name):
+    """Set the runtime store ('prod'/'dev') or None to revert to CC_HOME."""
+    if name is None:
+        STORE_OVERRIDE["home"] = None
+        return _configured_home()
+    if name not in STORE_NAMES:
+        raise ValueError("store must be one of %s" % (STORE_NAMES,))
+    home = _named_store_home(name)
+    STORE_OVERRIDE["home"] = home
+    return home
+
+
+def current_store_name():
+    """Return the active store's exact public name."""
+    home = STORE_OVERRIDE.get("home") or _configured_home()
+    base = os.path.basename(os.path.normpath(home))
+    if base.endswith("-prod"):
+        return "prod"
+    if base.endswith("-dev"):
+        return "dev"
+    return "prod" if home == _named_store_home("prod") else "custom"
+
+
 def get_home():
+    override = STORE_OVERRIDE.get("home")
+    if override:
+        return override
     return os.environ.get("CC_HOME", DEFAULT_HOME)
 
 

@@ -1,6 +1,6 @@
 # Command Centre — Next-Step Plan
 
-Status: Steps 1-4 COMPLETE and verified. Step 5 deferred.
+Status: Steps 1-4 COMPLETE and verified. Runtime PROD/DEV dashboard switching COMPLETE and verified. Step 5 deferred.
 
 ## Current state (updated 2026-10-12)
 
