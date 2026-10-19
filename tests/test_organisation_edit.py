@@ -54,6 +54,10 @@ def main():
         assert st == 201 and body["record"]["parent_id"] == area_id
         assert body["record"]["due"] == "2026-12-31"
         child_id = body["record"]["id"]
+        st, body = request("/api/organisation/update", {
+            "id": child_id, "due": "2027-01-15"
+        })
+        assert st == 200 and body["record"]["due"] == "2027-01-15"
         st, body = request("/api/organisation/create", {
             "title": "Review stored data", "kind": "task", "parent_id": child_id
         })

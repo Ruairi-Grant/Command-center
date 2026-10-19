@@ -274,10 +274,11 @@ PAGE = """<!doctype html>
     <span class="hint">status defaults to inbox</span>
   </form>
   <section class="organisation" id="organisation">
-    <h2>Organisation</h2>
+    <h2>Organisation <button id="org-add" class="org-action" type="button">Add organisation item</button></h2>
     <form class="org-editor" id="org-editor" hidden>
       <input id="org-id" type="hidden">
       <input id="org-parent" type="hidden">
+      <label id="org-parent-wrap">Parent<select id="org-parent-select"></select></label>
       <label>Title<input id="org-title" required maxlength="500"></label>
       <label>Type<select id="org-kind"><option value="area">Area</option><option value="goal">Goal</option><option value="project">Project</option><option value="task">Task</option><option value="question">Question</option><option value="milestone">Milestone</option></select></label>
       <label>Status<select id="org-status"></select></label>
@@ -297,8 +298,11 @@ const form = document.getElementById('newtask');
 const ntParent = document.getElementById('nt-parent');
 const orgTree = document.getElementById('organisation-tree');
 const orgEditor = document.getElementById('org-editor');
+const orgAdd = document.getElementById('org-add');
 const orgId = document.getElementById('org-id');
 const orgParent = document.getElementById('org-parent');
+const orgParentWrap = document.getElementById('org-parent-wrap');
+const orgParentSelect = document.getElementById('org-parent-select');
 const orgTitle = document.getElementById('org-title');
 const orgKind = document.getElementById('org-kind');
 const orgStatus = document.getElementById('org-status');
@@ -366,6 +370,8 @@ function showOrganisationEditor(node, parentId) {
   const editing = Boolean(node);
   orgId.value = editing ? node.id : '';
   orgParent.value = parentId || (editing ? '' : '');
+  orgParentSelect.value = parentId || '';
+  orgParentWrap.hidden = editing;
   orgTitle.value = editing ? node.title : '';
   orgKind.value = editing ? node.kind : (parentId ? 'task' : 'area');
   orgKind.disabled = editing;
@@ -402,7 +408,7 @@ function renderOrganisation(organisation) {
   return organisation.map(renderNode).join('') || '<div class="empty">No organisation items yet.</div>';
 }
 
-function populateParentOptions(organisation) {
+function buildParentOptions(organisation) {
   const options = ['<option value="">No parent</option>'];
   function walk(nodes, prefix) {
     nodes.forEach(n => {
@@ -411,7 +417,13 @@ function populateParentOptions(organisation) {
     });
   }
   walk(organisation, '');
-  ntParent.innerHTML = options.join('');
+  return options.join('');
+}
+
+function populateParentOptions(organisation) {
+  const options = buildParentOptions(organisation);
+  ntParent.innerHTML = options;
+  orgParentSelect.innerHTML = options;
 }
 
 function findOrganisationNode(nodes, id) {
@@ -431,6 +443,7 @@ orgKind.addEventListener('change', () => {
   statusOptions(orgKind.value);
   syncOrganisationDueField();
 });
+orgAdd.addEventListener('click', () => showOrganisationEditor(null, null));
 orgTree.addEventListener('click', (ev) => {
   const edit = ev.target.closest('button[data-org-edit]');
   if (edit) {
@@ -451,7 +464,7 @@ orgEditor.addEventListener('submit', async (ev) => {
   if (!body.title) { say('Title is required', true); return; }
   const url = editing ? '/api/organisation/update' : '/api/organisation/create';
   if (editing) body.id = orgId.value;
-  else { body.kind = orgKind.value; body.parent_id = orgParent.value || null; }
+  else { body.kind = orgKind.value; body.parent_id = orgParentSelect.value || null; }
   try {
     const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));

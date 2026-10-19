@@ -43,7 +43,9 @@ def main():
             html = response.read().decode()
         assert 'id="organisation"' in html
         assert 'id="nt-parent"' in html
-        assert 'data-org-add' not in html
+        assert 'id="org-add"' in html
+        assert 'id="org-parent-select"' in html
+        assert 'id="org-due"' in html
         assert "section('No date'" not in html
         assert "'next'" not in html
         assert 'Next action' not in html
@@ -51,6 +53,9 @@ def main():
         assert 'class="org-next"' not in html
         assert 'id="org-due"' in html
         assert 'due_source' in html
+        assert "orgAdd.addEventListener('click'" in html
+        assert "if (orgKind.value === 'project') body.due" in html
+        assert "orgParentSelect.value || null" in html
         print("ALL ORGANISATION UI TESTS PASSED")
         return 0
     finally:
