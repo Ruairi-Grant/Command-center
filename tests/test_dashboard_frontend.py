@@ -371,6 +371,13 @@ def main():
 
         check("background refresh preserves scroll position and collapsed organisation sections", c10)
 
+        def c11():
+            return ("id=\"nt-clear-due\"" in html
+                    and "ntDue.value = ''" in html
+                    and "ntClearDue.addEventListener('click'" in html)
+
+        check("unified form can clear a selected due date", c11)
+
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],
                                capture_output=True, text=True, timeout=180)

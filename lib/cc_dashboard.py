@@ -259,6 +259,7 @@ PAGE = """<!doctype html>
     <div class="field" style="flex:1 1 140px" id="nt-due-wrap">
       <label for="nt-due">Due</label>
       <input id="nt-due" name="due" type="date">
+      <button id="nt-clear-due" type="button" class="clear-date">Clear</button>
     </div>
     <div class="field" style="flex:0 0 140px" id="nt-status-wrap">
       <label for="nt-status">Status</label>
@@ -295,6 +296,7 @@ const ntId = document.getElementById('nt-id');
 const ntKind = document.getElementById('nt-kind');
 const ntKindStatus = document.getElementById('nt-status');
 const ntDue = document.getElementById('nt-due');
+const ntClearDue = document.getElementById('nt-clear-due');
 const ntDueWrap = document.getElementById('nt-due-wrap');
 const ntStatusWrap = document.getElementById('nt-status-wrap');
 const ntWaitingWrap = document.getElementById('nt-waiting-wrap');
@@ -467,6 +469,10 @@ ntKind.addEventListener('change', () => {
   populateParentOptions(currentOrganisation);
 });
 ntKindStatus.addEventListener('change', syncNewItemFields);
+ntClearDue.addEventListener('click', () => {
+  ntDue.value = '';
+  ntDue.focus();
+});
 ntCancel.addEventListener('click', resetUnifiedForm);
 orgAdd.addEventListener('click', () => {
   resetUnifiedForm();

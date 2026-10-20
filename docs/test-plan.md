@@ -91,6 +91,7 @@ Implementation meanings:
 | UI-011 | Successful refresh timestamp uses the user’s local date and time. | Refresh response is parsed as a date; locale formatting is used; failed refresh does not advance the displayed timestamp. | UI | Missing | Partial | High |
 | UI-012 | UI version is visible in the header. | Served page contains a version marker; version changes with the deployed UI; header identifies the active build. | UI | Missing | Missing | High |
 | UI-013 | Background refresh preserves page layout state. | Scroll position, open/collapsed organisation branches, and unsaved form input remain unchanged after a successful refresh. | UI | Missing | Partial | High |
+| UI-014 | Due dates can be cleared in the unified form. | Select a date, activate Clear, verify the input is empty and create/update sends a null due date. | UI/API | Missing | Partial | Medium |
 
 ### Store isolation and request consistency
 
