@@ -381,7 +381,7 @@ def main():
         def c12():
             return ("data-org-complete" in html
                     and "window.confirm('Complete this task?')" not in html
-                    and "'Done'" in html
+                    and ">Done</button>" in html
                     and "'/api/tasks/restore'" in html
                     and "'/api/tasks/complete'" in html
                     and "startUnifiedEdit" in html)

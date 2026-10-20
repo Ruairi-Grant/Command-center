@@ -55,8 +55,8 @@ Implementation meanings:
 | LIFE-003 | Tasks support Active, Waiting, Done, Cancelled. | Valid values; reject obsolete inbox/someday; default Active. | Unit/API | Partial | Missing | High |
 | LIFE-004 | Waiting tasks require Waiting-on. | Waiting without field rejected; blank rejected; non-Waiting field hidden/optional; return to Active. | Unit/API/UI | Missing | Missing | High |
 | LIFE-005 | Parent cannot be completed or cancelled with unfinished children. | Open child blocks Done; open child blocks Cancelled; all children resolved permits transition; completed/cancelled child does not block. | Unit/API | Missing | Missing | High |
-| LIFE-006 | Completion requires no confirmation and offers temporary Undo. | Completion is direct; Undo restores prior status and clears completion timestamp; no accidental completion from unrelated controls. | API/UI | Missing | Missing | High |
-| LIFE-007 | Completed/cancelled items leave active views but remain stored. | Complete task/project; verify state omission and raw persistence; no history toggle required initially. | Unit/API/UI | Partial | Partial | High |
+| LIFE-006 | Completion requires no confirmation and offers temporary Undo. | Completion is direct; Undo restores prior status and clears completion timestamp; no accidental completion from unrelated controls. | API/UI | Covered | Implemented | High |
+| LIFE-007 | Completed/cancelled items leave active views but remain stored. | Complete task/project; verify state omission and raw persistence; no history toggle required initially. | Unit/API/UI | Covered | Implemented | High |
 | LIFE-008 | Lifecycle changes preserve completion metadata. | Completion timestamp set; repeated completion; undo; restart persistence. | Unit/API | Partial | Partial | High |
 
 ### Dates and blockers
@@ -85,7 +85,7 @@ Implementation meanings:
 | UI-005 | Editing loads and saves current item values. | Title/status/date/notes/Waiting-on; clear fields; failed save leaves form usable. | UI/API | Partial | Partial | High |
 | UI-006 | Moving items is supported in the editor. | Current parent shown; valid move saved; invalid move rejected; effective date refreshed. | UI/API | Missing | Missing | High |
 | UI-007 | Active organisation view is modern, nested, and excludes completed/cancelled. | Nested render; collapse/expand; no heavy-box requirement; hidden completed data remains stored. | UI | Partial | Partial | Medium |
-| UI-008 | Completion control is direct and provides Undo. | Task/project completion from hierarchy and date views; no confirmation prompt; unfinished-child error; Undo. | UI/API | Missing | Missing | High |
+| UI-008 | Completion control is direct and provides Undo. | Task/project completion from hierarchy and date views; no confirmation prompt; unfinished-child error; Undo. | UI/API | Covered | Implemented | High |
 | UI-009 | Delete control enforces child restriction and confirmation. | Parent with children rejected; child-by-child cleanup; destructive confirmation. | UI/API | Missing | Missing | High |
 | UI-010 | Date views show effective dates and blockers. | Today/Overdue/Upcoming/Waiting; inherited marker; creation date for blockers. | UI/API | Partial | Partial | High |
 | UI-011 | Successful refresh timestamp uses the user’s local date and time. | Refresh response is parsed as a date; locale formatting is used; failed refresh does not advance the displayed timestamp. | UI | Missing | Partial | High |

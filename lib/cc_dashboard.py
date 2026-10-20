@@ -307,9 +307,9 @@ const toast = document.getElementById('toast');
 let toastTimer;
 let currentOrganisation = [];
 
-function say(msg, isErr, undoId) {
+function say(msg, isErr, undo) {
   toast.innerHTML = esc(msg);
-  if (undoId) toast.innerHTML += ' <button type="button" data-undo-task="' + esc(undoId) + '">Undo</button>';
+  if (undo) toast.innerHTML += ' <button type="button" data-undo-id="' + esc(undo.id) + '" data-undo-kind="' + esc(undo.kind) + '">Undo</button>';
   toast.className = 'toast show' + (isErr ? ' err' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.className = 'toast', 5000);
@@ -329,7 +329,7 @@ function taskLi(t, today) {
     + '<span class="prio ' + prio + '">' + prio + '</span>'
     + '<span class="title">' + esc(t.title) + '</span>'
     + '<span class="due' + (overdue ? ' over' : '') + '">' + label + '</span>'
-    + '<button data-id="' + esc(t.id) + '">Done</button>'
+    + '<button data-id="' + esc(t.id) + '" data-previous-status="' + esc(t.status || 'active') + '">Done</button>'
     + '</li>';
 }
 
@@ -392,7 +392,9 @@ function startUnifiedEdit(node) {
 }
 
 function orgControls(n) {
-  return '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
+  const done = n.kind !== 'area' && n.status !== 'done' && n.status !== 'cancelled'
+    ? '<button class="org-action" type="button" data-org-complete="' + esc(n.id) + '" data-org-kind="' + esc(n.kind) + '">Done</button>' : '';
+  return done + '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
     + '<button class="org-action danger" type="button" data-org-delete="' + esc(n.id) + '">Delete</button>';
 }
 
@@ -465,6 +467,22 @@ orgAdd.addEventListener('click', () => {
   document.getElementById('nt-title').focus();
 });
 orgTree.addEventListener('click', async (ev) => {
+  const complete = ev.target.closest('button[data-org-complete]');
+  if (complete) {
+    ev.stopPropagation();
+    complete.disabled = true;
+    const kind = complete.dataset.orgKind;
+    const url = kind === 'task' ? '/api/tasks/complete' : '/api/organisation/update';
+    const body = kind === 'task' ? {id: complete.dataset.orgComplete} : {id: complete.dataset.orgComplete, status: 'done'};
+    try {
+      const r = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      say('Marked done', false, {id: complete.dataset.orgComplete, kind: kind});
+      load();
+    } catch (e) { complete.disabled = false; say('Failed: ' + e.message, true); }
+    return;
+  }
   const del = ev.target.closest('button[data-org-delete]');
   if (del) {
     ev.stopPropagation();
@@ -595,14 +613,14 @@ form.addEventListener('submit', async (ev) => {
 });
 
 toast.addEventListener('click', async (ev) => {
-  const undo = ev.target.closest('button[data-undo-task]');
+  const undo = ev.target.closest('button[data-undo-id]');
   if (!undo) return;
   undo.disabled = true;
+  const kind = undo.dataset.undoKind;
+  const url = kind === 'task' ? '/api/tasks/restore' : '/api/organisation/update';
+  const body = kind === 'task' ? {id: undo.dataset.undoId} : {id: undo.dataset.undoId, status: 'active'};
   try {
-    const r = await fetch('/api/tasks/restore', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({id: undo.dataset.undoTask}),
-    });
+    const r = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     say('Restored');
@@ -618,7 +636,6 @@ app.addEventListener('click', async (ev) => {
   const b = ev.target.closest('button[data-id]');
   if (!b) return;
   const taskId = b.dataset.id;
-  if (!window.confirm('Complete this task?')) return;
   const url = '/api/tasks/complete';
   const body = JSON.stringify({ id: taskId });
   b.disabled = true;
@@ -628,7 +645,7 @@ app.addEventListener('click', async (ev) => {
       const t = await r.text();
       throw new Error(t || ('HTTP ' + r.status));
     }
-    say(taskId ? 'Marked done' : 'Marked done', false, taskId || null);
+    say('Marked done', false, {id: taskId, kind: 'task'});
     load();
   } catch (e) {
     b.disabled = false;

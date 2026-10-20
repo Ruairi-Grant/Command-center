@@ -746,6 +746,7 @@ def complete_task(actor, rid):
             raise CCError("task %s not found" % rid)
         if _unfinished_children(rid, home):
             raise CCError("cannot complete an item with unfinished children")
+        rec["previous_status"] = rec.get("status") or "active"
         rec["status"] = "done"
         rec["completed_at"] = iso_now()
         rec["updated"] = rec["completed_at"]
@@ -805,11 +806,19 @@ def update_goal(actor, rid, **patch):
     with mutation(actor, "goal.update", "goal:" + rid, home):
         records = load_kind("goals", home)
         rec = _find(records, rid)
+        old_status = rec.get("status") if rec else None
         for k, v in clean.items():
             if k in patch:
                 rec[k] = v
         if rec.get("kind") == "area":
             rec.pop("status", None)
+        if kind == "project" and patch.get("status") == "done" and old_status != "done":
+            rec["previous_status"] = old_status or "active"
+            rec["completed_at"] = iso_now()
+        elif kind == "project" and patch.get("status") == "active" and old_status == "done":
+            rec["status"] = rec.get("previous_status") or "active"
+            rec["previous_status"] = None
+            rec["completed_at"] = None
         _atomic_write_lines(data_file("goals", home), records)
     return rec
 
@@ -822,7 +831,8 @@ def restore_task(actor, rid):
         rec = _find(records, rid)
         if rec is None:
             raise CCError("task %s not found" % rid)
-        rec["status"] = "active"
+        rec["status"] = rec.get("previous_status") or "active"
+        rec["previous_status"] = None
         rec["completed_at"] = None
         rec["updated"] = iso_now()
         _atomic_write_lines(data_file("tasks", home), records)
@@ -955,7 +965,8 @@ def _task_views_with_inherited_due(tasks, goals):
 
 
 def _organisation_tree(tasks, goals):
-    records = [r for r in goals + tasks if r.get("kind")]
+    records = [r for r in goals + tasks
+               if r.get("kind") and r.get("status") not in ("done", "cancelled")]
     by_parent = {}
     for rec in records:
         by_parent.setdefault(rec.get("parent_id"), []).append(rec)
