@@ -602,7 +602,9 @@ form.addEventListener('submit', async (ev) => {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    say(editing ? 'Saved changes' : 'Added: ' + (j.record ? j.record.title : kind));
+    const completionUndo = editing && payload.status === 'done' && j.record
+      ? {id: j.record.id, kind: kind} : null;
+    say(editing ? (completionUndo ? 'Marked done' : 'Saved changes') : 'Added: ' + (j.record ? j.record.title : kind), false, completionUndo);
     resetUnifiedForm();
     load();
   } catch (e) {

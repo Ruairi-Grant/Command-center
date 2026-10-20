@@ -122,6 +122,15 @@ class LifecycleContractTests(IsolatedStoreTestCase):
         self.assertEqual(restored["status"], "active")
         self.assertIsNone(restored.get("completed_at"))
 
+    def test_LIFE_009_editing_task_done_sets_timestamp_and_undoes(self):
+        task = cc.create_organisation("test", title="Editable", kind="task", status="waiting", waiting_on="Reply")
+        done = cc.update_organisation("test", task["id"], status="done")
+        self.assertEqual(done["status"], "done")
+        self.assertIsNotNone(done.get("completed_at"))
+        restored = cc.restore_task("test", task["id"])
+        self.assertEqual(restored["status"], "waiting")
+        self.assertIsNone(restored.get("completed_at"))
+
     def test_DATE_003_waiting_tasks_are_also_in_effective_date_view(self):
         due = (cc.today() - dt.timedelta(days=1)).isoformat()
         task = cc.create_organisation("test", title="Blocked", kind="task",

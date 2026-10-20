@@ -725,6 +725,7 @@ def update_task(actor, rid, **patch):
             raise CCError("task %s not found" % rid)
         merged = dict(rec)
         merged.update(clean)
+        old_status = rec.get("status") or "active"
         if merged.get("status") == "waiting" and not (merged.get("waiting_on") or "").strip():
             raise CCError("waiting_on is required when status is waiting")
         if merged.get("status") in ("done", "cancelled") and _unfinished_children(rid, home):
@@ -732,6 +733,13 @@ def update_task(actor, rid, **patch):
         for k, v in clean.items():
             if k in patch:  # only overwrite fields explicitly provided
                 rec[k] = v
+        if clean.get("status") == "done" and old_status != "done":
+            rec["previous_status"] = old_status
+            rec["completed_at"] = iso_now()
+        elif clean.get("status") == "active" and old_status == "done":
+            rec["status"] = rec.get("previous_status") or "active"
+            rec["previous_status"] = None
+            rec["completed_at"] = None
         rec["updated"] = iso_now()
         _atomic_write_lines(data_file("tasks", home), records)
     return rec

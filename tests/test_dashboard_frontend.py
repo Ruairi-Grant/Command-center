@@ -394,6 +394,12 @@ def main():
 
         check("Undo toast accepts pointer input", c13)
 
+        def c14():
+            return ("const completionUndo = editing && payload.status === 'done'" in html
+                    and "say(editing ? (completionUndo ? 'Marked done'" in html)
+
+        check("editing an item to Done also exposes Undo", c14)
+
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],
                                capture_output=True, text=True, timeout=180)
