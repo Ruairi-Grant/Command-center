@@ -178,8 +178,12 @@ def build_env(html):
     form = El(id_="newtask", tag="FORM")
     form._submit_button = El(tag="BUTTON", in_form=True)
     els = [form,
+           El(id_="nt-kind", in_form=True),
            El(id_="nt-title", in_form=True),
            El(id_="nt-due", in_form=True),
+           El(id_="nt-status", in_form=True),
+           El(id_="nt-parent", in_form=True),
+           El(id_="nt-waiting", in_form=True),
            El(id_="nt-priority", in_form=True),
            El(id_="nt-notes", in_form=True),
            El(id_="app", tag="MAIN"),
@@ -188,6 +192,9 @@ def build_env(html):
     doc = Doc(els)
     done_btn = El(tag="BUTTON", dataset={"id": "task123"})
 
+    doc.getElementById("nt-kind").value = "task"
+    doc.getElementById("nt-status").value = "active"
+
     submit_src = handler_source(html, "form.addEventListener('submit'")
     click_src = handler_source(html, "app.addEventListener('click'")
 
@@ -195,15 +202,18 @@ def build_env(html):
         ev.preventDefault()
         ev.stopPropagation()
         payload = {
+            "kind": doc.getElementById("nt-kind").value,
             "title": doc.getElementById("nt-title").value.strip(),
             "due": doc.getElementById("nt-due").value or None,
-            "priority": doc.getElementById("nt-priority").value,
+            "status": doc.getElementById("nt-status").value,
+            "parent_id": doc.getElementById("nt-parent").value or None,
+            "waiting_on": doc.getElementById("nt-waiting").value.strip() or None,
             "notes": doc.getElementById("nt-notes").value.strip() or None,
         }
         if not payload["title"]:
             return
         payload = {k: v for k, v in payload.items() if v is not None}
-        fetch_shim("/api/tasks/create", {"method": "POST", "body": json.dumps(payload)})
+        fetch_shim("/api/organisation/create", {"method": "POST", "body": json.dumps(payload)})
 
     def on_click(ev):
         # mirrors the shipped guard; if absent, form clicks would leak
@@ -258,12 +268,14 @@ def main():
             if len(reqs) != 1:
                 return False
             r = reqs[0]
-            if not (r["url"].endswith("/api/tasks/create") and r["method"] == "POST"):
+            if not (r["url"].endswith("/api/organisation/create") and r["method"] == "POST"):
                 return False
             b = json.loads(r["body"])
-            return b.get("title") == "TEST - frontend wiring" and b.get("priority") == "normal"
+            return (b.get("kind") == "task"
+                    and b.get("title") == "TEST - frontend wiring"
+                    and b.get("status") == "active")
 
-        check("title-only submit -> one POST /api/tasks/create with title", c1)
+        check("unified form submit -> one POST /api/organisation/create with typed item", c1)
 
         def c2():
             reqs, doc, form, app, done, s, c = build_env(html)
@@ -281,9 +293,9 @@ def main():
             doc.getElementById("nt-notes").value = "note"
             form.submit()
             b = json.loads(reqs[0]["body"])
-            return b.get("due") == "2026-11-01" and b.get("priority") == "high" and b.get("notes") == "note"
+            return b.get("due") == "2026-11-01" and b.get("status") == "active" and b.get("notes") == "note"
 
-        check("optional due/priority/notes sent when supplied", c3)
+        check("optional due/status/notes sent when supplied", c3)
 
         def c3b():
             reqs, doc, form, app, done, s, c = build_env(html)
@@ -293,7 +305,7 @@ def main():
             doc.getElementById("nt-notes").value = ""
             form.submit()
             b = json.loads(reqs[0]["body"])
-            return "due" not in b and "notes" not in b and b.get("priority") == "normal"
+            return "due" not in b and "notes" not in b and b.get("status") == "active"
 
         check("empty due/notes omitted from payload", c3b)
 
@@ -332,6 +344,19 @@ def main():
             return r.status == 201 and j["record"]["status"] == "active"
 
         check("backend /api/tasks/create still returns 201 active", c7)
+
+        def c9():
+            return ("id=\"nt-kind\"" in html
+                    and "Area" in html and "Project" in html and "Task" in html
+                    and "/api/organisation/create" in html
+                    and "toLocaleString" in html
+                    and "new Date(s.generated_at)" in html
+                    and ".slice(11,16)" not in html
+                    and "data-ui-version" in html
+                    and "__UI_VERSION__" not in html
+                    and "UI v" in html)
+
+        check("header exposes UI version and local refresh time; top form supports all item types", c9)
 
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],

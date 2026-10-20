@@ -36,6 +36,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cc_store as cc  # noqa: E402
 
+UI_VERSION = "0.4.0"
+
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("CC_PORT", "8787"))
 
@@ -238,40 +240,48 @@ PAGE = """<!doctype html>
 </style>
 </head>
 <body>
-<header>
-  <h1>Command Centre</h1>
+<header data-ui-version="__UI_VERSION__">
+  <h1>Command Centre <span class="ui-version">UI v__UI_VERSION__</span></h1>
   <span class="meta" id="meta">loading…</span>
   <button class="store" id="store" type="button" title="Switch data store">STORE: loading…</button>
 </header>
 <main id="app">
   <form class="newtask" id="newtask" autocomplete="off">
+    <div class="field" style="flex:0 0 130px">
+      <label for="nt-kind">Item type</label>
+      <select id="nt-kind" name="kind">
+        <option value="task" selected>Task</option>
+        <option value="project">Project</option>
+        <option value="area">Area</option>
+      </select>
+    </div>
     <div class="field grow">
-      <label for="nt-title">Task <span class="req">*</span></label>
+      <label id="nt-title-label" for="nt-title">Title <span class="req">*</span></label>
       <input id="nt-title" name="title" type="text" maxlength="500"
              placeholder="What needs doing?" required>
     </div>
-    <div class="field" style="flex:1 1 140px">
+    <div class="field" style="flex:1 1 140px" id="nt-due-wrap">
       <label for="nt-due">Due</label>
       <input id="nt-due" name="due" type="date">
     </div>
-    <div class="field" style="flex:0 0 110px">
-      <label for="nt-priority">Priority</label>
-      <select id="nt-priority" name="priority">
-        <option value="normal" selected>Normal</option>
-        <option value="high">High</option>
-        <option value="low">Low</option>
-      </select>
+    <div class="field" style="flex:0 0 140px" id="nt-status-wrap">
+      <label for="nt-status">Status</label>
+      <select id="nt-status" name="status"></select>
     </div>
-    <div class="field" style="flex:0 0 170px">
+    <div class="field" style="flex:0 0 190px">
       <label for="nt-parent">Parent</label>
       <select id="nt-parent" name="parent_id"><option value="">No parent</option></select>
+    </div>
+    <div class="field grow" id="nt-waiting-wrap" hidden>
+      <label for="nt-waiting">Waiting on</label>
+      <input id="nt-waiting" name="waiting_on" maxlength="1000" placeholder="Person, system, or event">
     </div>
     <div class="field grow">
       <label for="nt-notes">Notes</label>
       <input id="nt-notes" name="notes" type="text" maxlength="2000" placeholder="Optional">
     </div>
-    <button type="submit">Add task</button>
-    <span class="hint">status defaults to active</span>
+    <button type="submit">Add item</button>
+    <span class="hint">Create an area, project, task, or subtask</span>
   </form>
   <section class="organisation" id="organisation">
     <h2>Organisation <button id="org-add" class="org-action" type="button">Add organisation item</button></h2>
@@ -295,6 +305,12 @@ PAGE = """<!doctype html>
 const app = document.getElementById('app');
 const list = document.getElementById('list');
 const form = document.getElementById('newtask');
+const ntKind = document.getElementById('nt-kind');
+const ntKindStatus = document.getElementById('nt-status');
+const ntDueWrap = document.getElementById('nt-due-wrap');
+const ntStatusWrap = document.getElementById('nt-status-wrap');
+const ntWaitingWrap = document.getElementById('nt-waiting-wrap');
+const ntWaiting = document.getElementById('nt-waiting');
 const ntParent = document.getElementById('nt-parent');
 const orgTree = document.getElementById('organisation-tree');
 const orgEditor = document.getElementById('org-editor');
@@ -360,6 +376,21 @@ function section(title, items, render, today) {
                       : '<div class="empty">Nothing here.</div>';
   html += '</div>';
   return html;
+}
+
+function syncNewItemFields() {
+  const kind = ntKind.value;
+  const isTask = kind === 'task';
+  const isArea = kind === 'area';
+  ntDueWrap.hidden = isArea;
+  ntStatusWrap.hidden = isArea;
+  ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
+  ntKindStatus.innerHTML = (isTask
+    ? ['active', 'waiting', 'done', 'cancelled']
+    : ['active', 'done', 'cancelled'])
+    .map(v => '<option value="' + v + '">' + v + '</option>').join('');
+  if (!ntKindStatus.value) ntKindStatus.value = 'active';
+  ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
 }
 
 function statusOptions(kind) {
@@ -448,6 +479,12 @@ function syncOrganisationDueField() {
   orgDueWrap.hidden = orgKind.value !== 'project';
 }
 
+ntKind.addEventListener('change', () => {
+  syncNewItemFields();
+  ntParent.innerHTML = buildParentOptions(currentOrganisation, ntKind.value, '');
+});
+ntKindStatus.addEventListener('change', syncNewItemFields);
+
 orgKind.addEventListener('change', () => {
   statusOptions(orgKind.value);
   populateParentOptions(currentOrganisation);
@@ -515,7 +552,7 @@ async function load() {
     list.innerHTML = '<div class="empty">Could not load state: ' + esc(e.message) + '</div>';
     return;
   }
-  meta.textContent = 'Today ' + esc(s.today) + ' · updated ' + esc(s.generated_at.slice(11,16));
+  meta.textContent = 'Today ' + new Date().toLocaleDateString() + ' · refreshed ' + new Date(s.generated_at).toLocaleString();
   currentOrganisation = s.organisation || [];
   populateParentOptions(currentOrganisation);
   orgTree.innerHTML = renderOrganisation(currentOrganisation);
@@ -580,27 +617,36 @@ store.addEventListener('click', async () => {
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   ev.stopPropagation();   // never let the submit reach the delegated click handler
+  const kind = ntKind.value;
   const titleEl = document.getElementById('nt-title');
   const payload = {
+    kind: kind,
     title: titleEl.value.trim(),
-    due: document.getElementById('nt-due').value || undefined,
-    priority: document.getElementById('nt-priority').value,
-    parent_id: ntParent.value || undefined,
-    notes: document.getElementById('nt-notes').value.trim() || undefined,
+    parent_id: ntParent.value || null,
+    notes: document.getElementById('nt-notes').value.trim() || null,
   };
+  if (kind !== 'area') {
+    payload.due = document.getElementById('nt-due').value || null;
+    payload.status = ntKindStatus.value;
+  }
+  if (kind === 'task') payload.waiting_on = ntWaiting.value.trim() || null;
+  if (kind === 'task' && payload.status === 'waiting' && !payload.waiting_on) {
+    say('Waiting on is required for waiting tasks', true); return;
+  }
   if (!payload.title) { say('Title is required', true); return; }
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true;
   try {
-    const r = await fetch('/api/tasks/create', {
+    const r = await fetch('/api/organisation/create', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify(payload),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    say('Added: ' + (j.record ? j.record.title : 'task'));
+    say('Added: ' + (j.record ? j.record.title : kind));
     form.reset();
-    document.getElementById('nt-priority').value = 'normal';
+    ntKind.value = 'task';
+    syncNewItemFields();
     load();
   } catch (e) {
     say('Failed: ' + e.message, true);
@@ -651,6 +697,7 @@ app.addEventListener('click', async (ev) => {
   }
 });
 
+syncNewItemFields();
 load();
 setInterval(load, 30000);
 </script>
@@ -739,7 +786,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._guard():
                 return
             if self.path in ("/", "/index.html"):
-                self._send_html(PAGE)
+                self._send_html(PAGE.replace("__UI_VERSION__", UI_VERSION))
             elif self.path == "/api/store/switch":
                 self._send_json({"store": cc.current_store_name()})
             elif self.path.startswith("/api/state"):

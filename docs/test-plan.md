@@ -87,6 +87,8 @@ Implementation meanings:
 | UI-008 | Completion control confirms and provides Undo. | Task/project completion; unfinished-child error; cancel confirmation; Undo. | UI/API | Missing | Missing | High |
 | UI-009 | Delete control enforces child restriction and confirmation. | Parent with children rejected; child-by-child cleanup; destructive confirmation. | UI/API | Missing | Missing | High |
 | UI-010 | Date views show effective dates and blockers. | Today/Overdue/Upcoming/Waiting; inherited marker; creation date for blockers. | UI/API | Partial | Partial | High |
+| UI-011 | Successful refresh timestamp uses the user’s local date and time. | Refresh response is parsed as a date; locale formatting is used; failed refresh does not advance the displayed timestamp. | UI | Missing | Partial | High |
+| UI-012 | UI version is visible in the header. | Served page contains a version marker; version changes with the deployed UI; header identifies the active build. | UI | Missing | Missing | High |
 
 ### Store isolation and request consistency
 
