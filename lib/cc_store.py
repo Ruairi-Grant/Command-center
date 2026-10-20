@@ -56,11 +56,11 @@ DEFAULT_HOME = os.path.dirname(_HERE)
 
 KINDS = ("tasks", "goals", "commitments")
 
-STATUSES = ("inbox", "active", "waiting", "someday", "done", "cancelled")
+STATUSES = ("active", "waiting", "done", "cancelled")
 PRIORITIES = ("high", "normal", "low")
-GOAL_STATUSES = ("active", "paused", "achieved", "dropped")
-WORK_KINDS = ("area", "goal", "project")
-TASK_KINDS = ("task", "question", "milestone")
+GOAL_STATUSES = ("active", "done", "cancelled")
+WORK_KINDS = ("area", "project")
+TASK_KINDS = ("task",)
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ID_RE = re.compile(r"^\d{8}-[0-9a-f]{6}$")
@@ -232,7 +232,7 @@ def validate_task(rec, partial=False):
         out["notes"] = out.get("notes") or None
         out["due"] = out.get("due") or None
         out["priority"] = out.get("priority") or "normal"
-        out["status"] = out.get("status") or "inbox"
+        out["status"] = out.get("status") or "active"
         out["kind"] = out.get("kind") or "task"
         out["parent_id"] = out.get("parent_id") or None
         out["waiting_on"] = out.get("waiting_on") or None
@@ -645,22 +645,54 @@ def _find(records, rid):
     return None
 
 
+def _unfinished_children(rid, home):
+    records = load_kind("goals", home) + load_kind("tasks", home)
+    return [r for r in records if r.get("parent_id") == rid
+            and r.get("status") not in ("done", "cancelled")]
+
+
+def _validate_parent_relationship(kind, parent_id, home, moving_id=None):
+    if parent_id is None:
+        return
+    records = load_kind("goals", home) + load_kind("tasks", home)
+    by_id = {r.get("id"): r for r in records}
+    parent = by_id.get(parent_id)
+    if parent is None:
+        raise CCError("parent %s not found" % parent_id)
+    parent_kind = parent.get("kind")
+    allowed = {
+        "area": set(),
+        "project": {"area"},
+        "task": {"area", "project", "task"},
+    }
+    if kind not in allowed or parent_kind not in allowed[kind]:
+        raise CCError("%s cannot have parent kind %s" % (kind, parent_kind))
+    seen = set()
+    cursor = parent
+    while cursor is not None:
+        cursor_id = cursor.get("id")
+        if cursor_id in seen:
+            raise CCError("circular hierarchy")
+        seen.add(cursor_id)
+        if moving_id and cursor_id == moving_id:
+            raise CCError("circular hierarchy")
+        cursor = by_id.get(cursor.get("parent_id"))
+
+
 def _require_parent_exists(parent_id, home):
     if parent_id is None:
         return
-    if _find(load_kind("goals", home), parent_id) is not None:
-        return
-    if _find(load_kind("tasks", home), parent_id) is not None:
-        return
-    raise CCError("parent %s not found" % parent_id)
+    _validate_parent_relationship("task", parent_id, home)
 
 
 def create_task(actor, **fields):
     home = get_home()
     rec = validate_task(fields)
+    if rec.get("status") == "waiting" and not (rec.get("waiting_on") or "").strip():
+        raise CCError("waiting_on is required when status is waiting")
     _require_parent_exists(rec.get("parent_id"), home)
     rec["id"] = new_id()
-    rec["status"] = rec.get("status") or "inbox"
+    rec["status"] = rec.get("status") or "active"
     rec["priority"] = rec.get("priority") or "normal"
     rec["tags"] = rec.get("tags") or []
     rec["created"] = iso_now()
@@ -679,12 +711,20 @@ def update_task(actor, rid, **patch):
     clean.pop("id", None)
     home = get_home()
     if "parent_id" in clean:
-        _require_parent_exists(clean["parent_id"], home)
+        _validate_parent_relationship("task", clean["parent_id"], home, moving_id=rid)
+    if "waiting_on" in clean and not (clean.get("waiting_on") or "").strip():
+        clean["waiting_on"] = None
     with mutation(actor, "task.update", "task:" + rid, home):
         records = load_kind("tasks", home)
         rec = _find(records, rid)
         if rec is None:
             raise CCError("task %s not found" % rid)
+        merged = dict(rec)
+        merged.update(clean)
+        if merged.get("status") == "waiting" and not (merged.get("waiting_on") or "").strip():
+            raise CCError("waiting_on is required when status is waiting")
+        if merged.get("status") in ("done", "cancelled") and _unfinished_children(rid, home):
+            raise CCError("cannot complete or cancel an item with unfinished children")
         for k, v in clean.items():
             if k in patch:  # only overwrite fields explicitly provided
                 rec[k] = v
@@ -700,6 +740,8 @@ def complete_task(actor, rid):
         rec = _find(records, rid)
         if rec is None:
             raise CCError("task %s not found" % rid)
+        if _unfinished_children(rid, home):
+            raise CCError("cannot complete an item with unfinished children")
         rec["status"] = "done"
         rec["completed_at"] = iso_now()
         rec["updated"] = rec["completed_at"]
@@ -710,10 +752,19 @@ def complete_task(actor, rid):
 def create_goal(actor, **fields):
     home = get_home()
     rec = validate_goal(fields)
-    _require_parent_exists(rec.get("parent_id"), home)
     rec["id"] = new_id()
     rec["kind"] = rec.get("kind") or "goal"
-    rec["status"] = rec.get("status") or "active"
+    if rec["kind"] == "area":
+        if fields.get("status") not in (None, ""):
+            raise CCError("areas do not have a status")
+        _validate_parent_relationship("area", rec.get("parent_id"), home)
+        rec.pop("status", None)
+    elif rec["kind"] == "project":
+        _validate_parent_relationship("project", rec.get("parent_id"), home)
+        rec["status"] = rec.get("status") or "active"
+    else:
+        _require_parent_exists(rec.get("parent_id"), home)
+        rec["status"] = rec.get("status") or "active"
     rec.setdefault("next_actions", [])
     rec["created"] = iso_now()
     with mutation(actor, "goal.create", "goal:" + rec["id"], home):
@@ -728,20 +779,69 @@ def update_goal(actor, rid, **patch):
     clean = validate_goal(patch, partial=True)
     clean.pop("id", None)
     home = get_home()
-    if "parent_id" in clean:
-        _require_parent_exists(clean["parent_id"], home)
+    records = load_kind("goals", home)
+    rec = _find(records, rid)
+    if rec is None:
+        raise CCError("goal %s not found" % rid)
+    kind = rec.get("kind")
+    if "kind" in patch and patch["kind"] != kind:
+        raise CCError("changing item type is not supported")
+    if kind == "area":
+        if patch.get("status") not in (None, ""):
+            raise CCError("areas do not have a status")
+        if "parent_id" in patch:
+            _validate_parent_relationship("area", patch["parent_id"], home, moving_id=rid)
+    elif kind == "project":
+        if "status" in patch and patch["status"] not in GOAL_STATUSES:
+            raise CCError("project status is invalid")
+        if "parent_id" in patch:
+            _validate_parent_relationship("project", patch["parent_id"], home, moving_id=rid)
+        if patch.get("status") in ("done", "cancelled") and _unfinished_children(rid, home):
+            raise CCError("cannot complete or cancel an item with unfinished children")
     with mutation(actor, "goal.update", "goal:" + rid, home):
         records = load_kind("goals", home)
         rec = _find(records, rid)
-        if rec is None:
-            raise CCError("goal %s not found" % rid)
         for k, v in clean.items():
             if k in patch:
                 rec[k] = v
+        if rec.get("kind") == "area":
+            rec.pop("status", None)
         _atomic_write_lines(data_file("goals", home), records)
     return rec
 
 
+def restore_task(actor, rid):
+    _check_id(rid)
+    home = get_home()
+    with mutation(actor, "task.restore", "task:" + rid, home):
+        records = load_kind("tasks", home)
+        rec = _find(records, rid)
+        if rec is None:
+            raise CCError("task %s not found" % rid)
+        rec["status"] = "active"
+        rec["completed_at"] = None
+        rec["updated"] = iso_now()
+        _atomic_write_lines(data_file("tasks", home), records)
+    return rec
+
+
+def delete_organisation(actor, rid):
+    _check_id(rid)
+    home = get_home()
+    for kind in ("goals", "tasks"):
+        records = load_kind(kind, home)
+        rec = _find(records, rid)
+        if rec is None:
+            continue
+        if _unfinished_children(rid, home) or any(
+                r.get("parent_id") == rid for r in load_kind("goals", home) + load_kind("tasks", home)):
+            raise CCError("cannot delete an item with children")
+        with mutation(actor, "organisation.delete", kind + ":" + rid, home):
+            records = load_kind(kind, home)
+            records = [r for r in records if r.get("id") != rid]
+            _atomic_write_lines(data_file(kind, home), records)
+        return {"id": rid, "deleted": True}
+    raise CCError("organisation item %s not found" % rid)
 def create_commitment(actor, **fields):
     home = get_home()
     rec = validate_commitment(fields)
@@ -770,11 +870,19 @@ def complete_commitment(actor, rid):
 
 def create_organisation(actor, **fields):
     kind = fields.get("kind")
-    if kind in WORK_KINDS:
+    if kind == "area":
+        if fields.get("parent_id") is not None:
+            raise CCError("areas cannot have parents")
+        if fields.get("status") not in (None, ""):
+            raise CCError("areas do not have a status")
         return create_goal(actor, **fields)
-    if kind in TASK_KINDS:
+    if kind == "project":
+        if fields.get("status") not in (None, "", *GOAL_STATUSES):
+            raise CCError("project status is invalid")
+        return create_goal(actor, **fields)
+    if kind == "task":
         return create_task(actor, **fields)
-    raise CCError("field 'kind' must be one of area/goal/project/task/question/milestone")
+    raise CCError("field 'kind' must be one of area/project/task")
 
 
 def update_organisation(actor, rid, **patch):
@@ -803,7 +911,7 @@ def today():
 
 def open_tasks(tasks=None):
     return [t for t in (tasks if tasks is not None else load_kind("tasks"))
-            if t.get("status") in ("inbox", "active", "waiting") ]
+            if t.get("status") in ("active", "waiting") ]
 
 
 def due_on_or_before(t, day):

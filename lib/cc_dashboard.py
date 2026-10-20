@@ -271,7 +271,7 @@ PAGE = """<!doctype html>
       <input id="nt-notes" name="notes" type="text" maxlength="2000" placeholder="Optional">
     </div>
     <button type="submit">Add task</button>
-    <span class="hint">status defaults to inbox</span>
+    <span class="hint">status defaults to active</span>
   </form>
   <section class="organisation" id="organisation">
     <h2>Organisation <button id="org-add" class="org-action" type="button">Add organisation item</button></h2>
@@ -280,10 +280,10 @@ PAGE = """<!doctype html>
       <input id="org-parent" type="hidden">
       <label id="org-parent-wrap">Parent<select id="org-parent-select"></select></label>
       <label>Title<input id="org-title" required maxlength="500"></label>
-      <label>Type<select id="org-kind"><option value="area">Area</option><option value="goal">Goal</option><option value="project">Project</option><option value="task">Task</option><option value="question">Question</option><option value="milestone">Milestone</option></select></label>
-      <label>Status<select id="org-status"></select></label>
+      <label>Type<select id="org-kind"><option value="area">Area</option><option value="project">Project</option><option value="task">Task</option></select></label>
+      <label id="org-status-wrap">Status<select id="org-status"></select></label>
       <label id="org-due-wrap">Due date<input id="org-due" type="date"></label>
-      <label>Waiting on<input id="org-waiting"></label>
+      <label id="org-waiting-wrap">Waiting on<input id="org-waiting"></label>
       <div class="org-editor-actions"><button type="submit">Save</button><button id="org-cancel" type="button">Cancel</button></div>
     </form>
     <div class="org-tree" id="organisation-tree"><div class="empty">Loading…</div></div>
@@ -306,7 +306,9 @@ const orgParentSelect = document.getElementById('org-parent-select');
 const orgTitle = document.getElementById('org-title');
 const orgKind = document.getElementById('org-kind');
 const orgStatus = document.getElementById('org-status');
+const orgStatusWrap = document.getElementById('org-status-wrap');
 const orgDueWrap = document.getElementById('org-due-wrap');
+const orgWaitingWrap = document.getElementById('org-waiting-wrap');
 const orgDue = document.getElementById('org-due');
 const orgWaiting = document.getElementById('org-waiting');
 const meta = document.getElementById('meta');
@@ -315,11 +317,12 @@ const toast = document.getElementById('toast');
 let toastTimer;
 let currentOrganisation = [];
 
-function say(msg, isErr) {
-  toast.textContent = msg;
+function say(msg, isErr, undoId) {
+  toast.innerHTML = esc(msg);
+  if (undoId) toast.innerHTML += ' <button type="button" data-undo-task="' + esc(undoId) + '">Undo</button>';
   toast.className = 'toast show' + (isErr ? ' err' : '');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.className = 'toast', 2200);
+  toastTimer = setTimeout(() => toast.className = 'toast', 5000);
 }
 
 function esc(s) {
@@ -360,26 +363,29 @@ function section(title, items, render, today) {
 }
 
 function statusOptions(kind) {
-  const values = ['area', 'goal', 'project'].includes(kind)
-    ? ['active', 'paused', 'achieved', 'dropped']
-    : ['inbox', 'active', 'waiting', 'someday', 'done', 'cancelled'];
+  const values = kind === 'project'
+    ? ['active', 'done', 'cancelled']
+    : ['active', 'waiting', 'done', 'cancelled'];
   orgStatus.innerHTML = values.map(v => '<option value="' + v + '">' + v + '</option>').join('');
+  orgStatusWrap.hidden = kind === 'area';
+  orgWaitingWrap.hidden = kind !== 'task' || orgStatus.value !== 'waiting';
 }
 
 function showOrganisationEditor(node, parentId) {
   const editing = Boolean(node);
   orgId.value = editing ? node.id : '';
-  orgParent.value = parentId || (editing ? '' : '');
-  orgParentSelect.value = parentId || '';
-  orgParentWrap.hidden = editing;
+  orgParent.value = parentId || (editing ? (node.parent_id || '') : '');
+  orgParentSelect.value = parentId || (editing ? (node.parent_id || '') : '');
+  orgParentWrap.hidden = false;
   orgTitle.value = editing ? node.title : '';
   orgKind.value = editing ? node.kind : (parentId ? 'task' : 'area');
   orgKind.disabled = editing;
   statusOptions(orgKind.value);
-  orgStatus.value = editing ? node.status : (['area', 'goal', 'project'].includes(orgKind.value) ? 'active' : 'inbox');
+  orgStatus.value = editing ? (node.status || 'active') : (orgKind.value === 'project' ? 'active' : 'active');
   orgDue.value = editing ? (node.due_source === 'explicit' ? (node.due || '') : '') : '';
   orgDueWrap.hidden = orgKind.value !== 'project';
   orgWaiting.value = editing ? (node.waiting_on || '') : '';
+  orgWaitingWrap.hidden = orgKind.value !== 'task' || orgStatus.value !== 'waiting';
   orgEditor.hidden = false;
   orgTitle.focus();
 }
@@ -390,14 +396,15 @@ function closeOrganisationEditor() {
 }
 
 function orgControls(n) {
-  return '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>';
+  return '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
+    + '<button class="org-action danger" type="button" data-org-delete="' + esc(n.id) + '">Delete</button>';
 }
 
 function renderOrganisation(organisation) {
   function renderNode(n) {
     const label = '<span class="org-label">' + esc(n.title) + '</span>'
       + '<span class="org-kind">' + esc(n.kind) + '</span>'
-      + '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>'
+      + (n.kind === 'area' ? '' : '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>')
       + orgControls(n);
     const details = (n.due ? '<div class="org-due">Due: ' + esc(n.due) + (n.due_source === 'inherited' ? ' (inherited)' : '') + '</div>' : '')
       + (n.waiting_on ? '<div class="org-waiting">Waiting on: ' + esc(n.waiting_on) + '</div>' : '');
@@ -408,12 +415,15 @@ function renderOrganisation(organisation) {
   return organisation.map(renderNode).join('') || '<div class="empty">No organisation items yet.</div>';
 }
 
-function buildParentOptions(organisation) {
+function buildParentOptions(organisation, kind, excludeId) {
   const options = ['<option value="">No parent</option>'];
+  const allowed = kind === 'project' ? ['area'] : (kind === 'task' ? ['area', 'project', 'task'] : []);
   function walk(nodes, prefix) {
     nodes.forEach(n => {
-      options.push('<option value="' + esc(n.id) + '">' + esc(prefix + n.title) + '</option>');
-      walk(n.children || [], prefix + '↳ ');
+      if (n.id !== excludeId && allowed.includes(n.kind)) {
+        options.push('<option value="' + esc(n.id) + '">' + esc(prefix + n.title) + '</option>');
+        walk(n.children || [], prefix + '↳ ');
+      }
     });
   }
   walk(organisation, '');
@@ -421,9 +431,8 @@ function buildParentOptions(organisation) {
 }
 
 function populateParentOptions(organisation) {
-  const options = buildParentOptions(organisation);
-  ntParent.innerHTML = options;
-  orgParentSelect.innerHTML = options;
+  ntParent.innerHTML = buildParentOptions(organisation, 'task', '');
+  orgParentSelect.innerHTML = buildParentOptions(organisation, orgKind.value, orgId.value);
 }
 
 function findOrganisationNode(nodes, id) {
@@ -441,10 +450,29 @@ function syncOrganisationDueField() {
 
 orgKind.addEventListener('change', () => {
   statusOptions(orgKind.value);
+  populateParentOptions(currentOrganisation);
   syncOrganisationDueField();
 });
+orgStatus.addEventListener('change', () => {
+  orgWaitingWrap.hidden = orgKind.value !== 'task' || orgStatus.value !== 'waiting';
+});
 orgAdd.addEventListener('click', () => showOrganisationEditor(null, null));
-orgTree.addEventListener('click', (ev) => {
+orgTree.addEventListener('click', async (ev) => {
+  const del = ev.target.closest('button[data-org-delete]');
+  if (del) {
+    ev.stopPropagation();
+    if (!window.confirm('Delete this item? Children must be moved or deleted first.')) return;
+    try {
+      const r = await fetch('/api/organisation/delete', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id: del.dataset.orgDelete}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      say('Deleted'); load();
+    } catch (e) { say('Delete failed: ' + e.message, true); }
+    return;
+  }
   const edit = ev.target.closest('button[data-org-edit]');
   if (edit) {
     ev.stopPropagation();
@@ -456,15 +484,17 @@ document.getElementById('org-cancel').addEventListener('click', closeOrganisatio
 orgEditor.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const editing = Boolean(orgId.value);
-  const body = {
-    title: orgTitle.value.trim(), status: orgStatus.value,
-    waiting_on: orgWaiting.value.trim() || null,
-  };
+  const body = { title: orgTitle.value.trim(), parent_id: orgParentSelect.value || null };
+  if (orgKind.value !== 'area') body.status = orgStatus.value;
+  if (orgKind.value === 'task') body.waiting_on = orgWaiting.value.trim() || null;
   if (orgKind.value === 'project') body.due = orgDue.value || null;
+  if (orgKind.value === 'task' && orgStatus.value === 'waiting' && !body.waiting_on) {
+    say('Waiting on is required for waiting tasks', true); return;
+  }
   if (!body.title) { say('Title is required', true); return; }
   const url = editing ? '/api/organisation/update' : '/api/organisation/create';
   if (editing) body.id = orgId.value;
-  else { body.kind = orgKind.value; body.parent_id = orgParentSelect.value || null; }
+  else body.kind = orgKind.value;
   try {
     const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
@@ -578,7 +608,23 @@ form.addEventListener('submit', async (ev) => {
   }
 });
 
-// Delegated "Done" buttons. IMPORTANT: the create form lives inside #app,
+toast.addEventListener('click', async (ev) => {
+  const undo = ev.target.closest('button[data-undo-task]');
+  if (!undo) return;
+  undo.disabled = true;
+  try {
+    const r = await fetch('/api/tasks/restore', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({id: undo.dataset.undoTask}),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    say('Restored');
+    load();
+  } catch (e) { say('Undo failed: ' + e.message, true); }
+});
+
+
 // so clicks on its controls bubble here — ignore anything in the form,
 // and only act on buttons that actually carry a record id.
 app.addEventListener('click', async (ev) => {
@@ -586,6 +632,7 @@ app.addEventListener('click', async (ev) => {
   const b = ev.target.closest('button[data-id], button[data-cid]');
   if (!b) return;
   const taskId = b.dataset.id, commitId = b.dataset.cid;
+  if (taskId && !window.confirm('Complete this task?')) return;
   const url = taskId ? '/api/tasks/complete' : '/api/commitments/complete';
   const body = JSON.stringify({ id: taskId || commitId });
   b.disabled = true;
@@ -595,7 +642,7 @@ app.addEventListener('click', async (ev) => {
       const t = await r.text();
       throw new Error(t || ('HTTP ' + r.status));
     }
-    say('Marked done');
+    say(taskId ? 'Marked done' : 'Marked done', false, taskId || null);
     load();
   } catch (e) {
     b.disabled = false;
@@ -751,13 +798,28 @@ class Handler(BaseHTTPRequestHandler):
                     rec = cc.update_organisation("dashboard", rid, **fields)
                     self._send_json({"ok": True, "record": rec})
                     return
+                if self.path == "/api/organisation/delete":
+                    rid = body.get("id")
+                    if not isinstance(rid, str):
+                        self._send_json({"error": "missing id"}, 400)
+                        return
+                    rec = cc.delete_organisation("dashboard", rid)
+                    self._send_json({"ok": True, "record": rec})
+                    return
+                if self.path == "/api/tasks/restore":
+                    rid = body.get("id")
+                    if not isinstance(rid, str):
+                        self._send_json({"error": "missing id"}, 400)
+                        return
+                    rec = cc.restore_task("dashboard", rid)
+                    self._send_json({"ok": True, "record": rec})
+                    return
                 if self.path == "/api/tasks/create":
                     fields = {}
                     for k in ("title", "notes", "priority", "due", "tags", "parent_id"):
                         if k in body and body[k] not in (None, ""):
                             fields[k] = body[k]
-                    # status is deliberately NOT accepted from the dashboard:
-                    # new tasks always start at the store's default (inbox).
+                    # new tasks always start at active unless changed later.
                     rec = cc.create_task("dashboard", **fields)
                     self._send_json({"ok": True, "record": rec}, 201)
                     return

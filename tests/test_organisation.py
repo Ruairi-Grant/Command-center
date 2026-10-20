@@ -23,18 +23,18 @@ def main():
                                 next_action="Review the data currently stored.",
                                 due="2026-12-31")
         task = cc.create_task("test", title="Review stored data", kind="task",
-                              parent_id=project["id"], status="inbox")
+                              parent_id=project["id"], status="active")
         explicit_task = cc.create_task("test", title="Deadline override", kind="task",
-                                       parent_id=project["id"], status="inbox",
+                                       parent_id=project["id"], status="active",
                                        due="2026-10-25")
-        question = cc.create_task("test", title="Is Notion permitted?", kind="question",
-                                  parent_id=project["id"], status="waiting",
-                                  waiting_on="Data policy decision")
+        waiting_task = cc.create_task("test", title="Is Notion permitted?", kind="task",
+                                      parent_id=project["id"], status="waiting",
+                                      waiting_on="Data policy decision")
 
         assert area["kind"] == "area" and area["parent_id"] is None
         assert project["kind"] == "project" and project["parent_id"] == area["id"]
         assert project["due"] == "2026-12-31"
-        assert task["parent_id"] == project["id"] and task["status"] == "inbox"
+        assert task["parent_id"] == project["id"] and task["status"] == "active"
         state = cc.build_state()
         tree_task = next(n for n in state["organisation"][0]["children"][0]["children"]
                          if n["title"] == "Review stored data")
@@ -45,7 +45,7 @@ def main():
         state_task = next(t for t in state["no_date_tasks"] + state["upcoming_tasks"]
                           if t["id"] == explicit_task["id"])
         assert state_task["due"] == "2026-10-25" and state_task["due_source"] == "explicit"
-        assert question["kind"] == "question" and question["waiting_on"] == "Data policy decision"
+        assert waiting_task["kind"] == "task" and waiting_task["waiting_on"] == "Data policy decision"
 
         try:
             cc.create_task("test", title="orphan", parent_id="20260101-aaaaaa")

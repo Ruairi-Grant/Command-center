@@ -27,9 +27,9 @@ def run(args, env):
 
 
 def test_status_defaults():
-    """Regression: new tasks default to status/priority; explicit ones stick.
+    """Regression: new tasks default to active; explicit statuses stick.
 
-    Requirements: default 'inbox' when no status supplied; explicitly
+    Requirements: default 'active' when no status supplied; explicitly
     supplied valid statuses preserved; partial-update/merge unchanged.
     """
     sys.path.insert(0, LIB)
@@ -38,17 +38,21 @@ def test_status_defaults():
     os.environ["CC_HOME"] = home
     cc.DEFAULT_HOME = home
     try:
-        # 1. no status supplied -> defaults to inbox (and priority normal)
+        # 1. no status supplied -> defaults to active (and priority normal)
         t1 = cc.create_task("test", title="no status given")
-        assert t1["status"] == "inbox", "default status not inbox: %r" % t1["status"]
+        assert t1["status"] == "active", "default status not active: %r" % t1["status"]
         assert t1["priority"] == "normal", "default priority not normal"
         print("[defaults] create with no status -> %r" % t1["status"])
 
         # 2. explicitly supplied valid statuses are preserved
-        for s in ("inbox", "active", "waiting", "done", "cancelled"):
-            t = cc.create_task("test", title="explicit " + s, status=s)
+        for s in ("active", "waiting", "done", "cancelled"):
+            kwargs = {"status": s}
+            if s == "waiting":
+                kwargs["waiting_on"] = "a response"
+            t = cc.create_task("test", title="explicit " + s, **kwargs)
             assert t["status"] == s, "explicit status %r not preserved: %r" % (s, t["status"])
-        print("[defaults] explicit statuses preserved:", [cc.create_task("test", title="x", status="waiting")["status"]])
+        kwargs = {"status": "waiting", "waiting_on": "a response"}
+        print("[defaults] explicit statuses preserved:", [cc.create_task("test", title="x", **kwargs)["status"]])
 
         # 3. explicit priority preserved
         t3 = cc.create_task("test", title="prio", priority="high")
@@ -57,7 +61,7 @@ def test_status_defaults():
 
         # 4. partial update still merges only provided fields
         t4 = cc.update_task("test", t1["id"], priority="low")
-        assert t4["status"] == "inbox" and t4["priority"] == "low" and t4["title"] == "no status given", \
+        assert t4["status"] == "active" and t4["priority"] == "low" and t4["title"] == "no status given", \
             "partial update changed untouched fields: %r" % t4
         t5 = cc.update_task("test", t1["id"], status="active")
         assert t5["status"] == "active" and t5["priority"] == "low" and t5["completed_at"] is None, \
@@ -81,6 +85,7 @@ def test_status_defaults():
 
 
 def main():
+    test_status_defaults()
     home = tempfile.mkdtemp(prefix="cc-test-")
     env = dict(os.environ, CC_HOME=home)
     print("test home:", home)

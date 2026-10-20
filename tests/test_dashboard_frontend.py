@@ -329,9 +329,9 @@ def main():
                                          method="POST")
             with urllib.request.urlopen(req, timeout=10) as r:
                 j = json.loads(r.read().decode())
-            return r.status == 201 and j["record"]["status"] == "inbox"
+            return r.status == 201 and j["record"]["status"] == "active"
 
-        check("backend /api/tasks/create still returns 201 inbox", c7)
+        check("backend /api/tasks/create still returns 201 active", c7)
 
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],

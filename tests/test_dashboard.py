@@ -90,20 +90,20 @@ def main():
                       "notes": "created via dashboard test", "due": "2026-10-15"})
         assert st == 201, "expected 201, got %s: %r" % (st, j)
         rec = j["record"]
-        assert rec["status"] == "inbox", "default status not inbox: %r" % rec["status"]
+        assert rec["status"] == "active", "default status not active: %r" % rec["status"]
         assert rec["priority"] == "high" and rec["due"] == "2026-10-15"
         assert rec["title"] == "TEST - dashboard create"
         assert rec["notes"] == "created via dashboard test"
         assert rec["tags"] == []
-        print("[create] 201, id=%s status=inbox priority=high due=2026-10-15" % rec["id"])
+        print("[create] 201, id=%s status=active priority=high due=2026-10-15" % rec["id"])
         tid = rec["id"]
 
         # --- 1b. defaults when only a title is supplied ---
         st, j = post(base + "/api/tasks/create", {"title": "TEST - defaults only"})
         assert st == 201
-        assert j["record"]["status"] == "inbox" and j["record"]["priority"] == "normal"
+        assert j["record"]["status"] == "active" and j["record"]["priority"] == "normal"
         assert j["record"]["due"] is None and j["record"]["notes"] is None
-        print("[create] defaults only -> status=inbox priority=normal due=None")
+        print("[create] defaults only -> status=active priority=normal due=None")
 
         # --- 2. task appears in dashboard state ---
         _, state = get_json(base + "/api/state")

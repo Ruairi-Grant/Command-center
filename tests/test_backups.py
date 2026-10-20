@@ -176,10 +176,10 @@ def main():
             snapshot_titles = [r["title"] for r in cc._load_file(os.path.join(snap, "tasks.jsonl"))]
             assert snapshot_titles == ["keep me"], snapshot_titles
             # mutate: change the task and add another
-            cc.update_task("test", t["id"], status="active")
+            cc.update_task("test", t["id"], status="done")
             cc.create_task("test", title="extra")
             assert "extra" in [r["title"] for r in cc.load_kind("tasks")]
-            assert cc._find(cc.load_kind("tasks"), t["id"])["status"] == "active"
+            assert cc._find(cc.load_kind("tasks"), t["id"])["status"] == "done"
             # restore -> should revert both changes
             import subprocess
             p = subprocess.run([PY, os.path.join(LIB, "cc_store.py"), "restore",
@@ -188,7 +188,7 @@ def main():
             assert p.returncode == 0, p.stderr
             titles = [r["title"] for r in cc.load_kind("tasks")]
             assert titles == snapshot_titles, (titles, snapshot_titles)
-            assert cc._find(cc.load_kind("tasks"), t["id"])["status"] != "active", \
+            assert cc._find(cc.load_kind("tasks"), t["id"])["status"] != "done", \
                 "restore did not revert the mutation"
         finally:
             shutil.rmtree(home, ignore_errors=True)

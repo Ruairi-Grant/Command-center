@@ -59,6 +59,29 @@ class HierarchyContractTests(IsolatedStoreTestCase):
 
 
 class LifecycleContractTests(IsolatedStoreTestCase):
+    def test_LIFE_001_parent_completion_and_deletion_require_resolved_children(self):
+        project = cc.create_organisation("test", title="Project", kind="project")
+        child = cc.create_organisation("test", title="Child", kind="task",
+                                       parent_id=project["id"])
+        with self.assertRaises(cc.CCError):
+            cc.update_organisation("test", project["id"], status="done")
+        with self.assertRaises(cc.CCError):
+            cc.delete_organisation("test", project["id"])
+        cc.complete_task("test", child["id"])
+        done = cc.update_organisation("test", project["id"], status="done")
+        self.assertEqual(done["status"], "done")
+        with self.assertRaises(cc.CCError):
+            cc.delete_organisation("test", project["id"])
+
+    def test_LIFE_005_completion_can_be_restored(self):
+        task = cc.create_organisation("test", title="Task", kind="task")
+        completed = cc.complete_task("test", task["id"])
+        self.assertEqual(completed["status"], "done")
+        self.assertIsNotNone(completed["completed_at"])
+        restored = cc.restore_task("test", task["id"])
+        self.assertEqual(restored["status"], "active")
+        self.assertIsNone(restored["completed_at"])
+
     def test_LIFE_002_projects_support_active_done_cancelled(self):
         for status in ("active", "done", "cancelled"):
             record = cc.create_organisation("test", title=status,
@@ -69,8 +92,11 @@ class LifecycleContractTests(IsolatedStoreTestCase):
         record = cc.create_organisation("test", title="Default task", kind="task")
         self.assertEqual(record["status"], "active")
         for status in ("active", "waiting", "done", "cancelled"):
+            fields = {"status": status}
+            if status == "waiting":
+                fields["waiting_on"] = "A response"
             record = cc.create_organisation("test", title=status, kind="task",
-                                            status=status)
+                                            **fields)
             self.assertEqual(record["status"], status)
         for obsolete in ("inbox", "someday"):
             with self.assertRaises(cc.CCError):
