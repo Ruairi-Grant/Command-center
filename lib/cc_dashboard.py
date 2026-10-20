@@ -409,7 +409,7 @@ function orgControls(n) {
     + '<button class="org-action danger" type="button" data-org-delete="' + esc(n.id) + '">Delete</button>';
 }
 
-function renderOrganisation(organisation) {
+function renderOrganisation(organisation, expandedIds) {
   function renderNode(n) {
     const label = '<span class="org-label">' + esc(n.title) + '</span>'
       + '<span class="org-kind">' + esc(n.kind) + '</span>'
@@ -418,7 +418,8 @@ function renderOrganisation(organisation) {
     const details = (n.due ? '<div class="org-due">Due: ' + esc(n.due) + (n.due_source === 'inherited' ? ' (inherited)' : '') + '</div>' : '')
       + (n.waiting_on ? '<div class="org-waiting">Waiting on: ' + esc(n.waiting_on) + '</div>' : '');
     if (!n.children.length) return '<div class="org-node">' + label + details + '</div>';
-    return '<details class="org-node" open><summary>' + label + '</summary>'
+    const open = !expandedIds || expandedIds.has(n.id) ? ' open' : '';
+    return '<details class="org-node" data-org-id="' + esc(n.id) + '"' + open + '><summary>' + label + '</summary>'
       + details + '<div class="org-children">' + n.children.map(renderNode).join('') + '</div></details>';
   }
   return organisation.map(renderNode).join('') || '<div class="empty">No organisation items yet.</div>';
@@ -489,6 +490,10 @@ orgTree.addEventListener('click', async (ev) => {
 });
 
 async function load() {
+  const scrollY = window.scrollY;
+  const expandedIds = orgTree.dataset.rendered
+    ? new Set([...orgTree.querySelectorAll('details[data-org-id][open]')].map(node => node.dataset.orgId))
+    : null;
   let s;
   try {
     const r = await fetch('/api/state');
@@ -501,7 +506,9 @@ async function load() {
   meta.textContent = 'Today ' + new Date().toLocaleDateString() + ' · refreshed ' + new Date(s.generated_at).toLocaleString();
   currentOrganisation = s.organisation || [];
   populateParentOptions(currentOrganisation);
-  orgTree.innerHTML = renderOrganisation(currentOrganisation);
+  orgTree.innerHTML = renderOrganisation(currentOrganisation, expandedIds);
+  orgTree.dataset.rendered = '1';
+  window.scrollTo(0, scrollY);
   updateStore();
   let html = '';
   html += section('Waiting', s.waiting || [], taskLi, s.today);

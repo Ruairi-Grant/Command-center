@@ -55,11 +55,13 @@ The page contains:
 
 The design should be modern and uncluttered, using indentation, whitespace, typography, subtle separators, badges, and expandable branches rather than repetitive heavy boxes.
 
-The layout must work on desktop and phone-sized screens. Controls must not overlap, and refreshes must not destroy text being entered.
+The layout must work on desktop and phone-sized screens. Controls must not overlap, and background refreshes must not destroy text being entered or change the current layout of page location or collapsed sections.
 
 Background refreshes must not overwrite unsaved form input. Browser reloads should preserve unfinished form drafts where practical, with drafts isolated by store.
 
 Background refreshes should update the refresh time and date if successful, in the users local time.
+
+The header should indicate the version number of the UI.
 
 ## 5\. Unified add-item area
 

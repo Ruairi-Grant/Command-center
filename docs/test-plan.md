@@ -89,6 +89,7 @@ Implementation meanings:
 | UI-010 | Date views show effective dates and blockers. | Today/Overdue/Upcoming/Waiting; inherited marker; creation date for blockers. | UI/API | Partial | Partial | High |
 | UI-011 | Successful refresh timestamp uses the user’s local date and time. | Refresh response is parsed as a date; locale formatting is used; failed refresh does not advance the displayed timestamp. | UI | Missing | Partial | High |
 | UI-012 | UI version is visible in the header. | Served page contains a version marker; version changes with the deployed UI; header identifies the active build. | UI | Missing | Missing | High |
+| UI-013 | Background refresh preserves page layout state. | Scroll position, open/collapsed organisation branches, and unsaved form input remain unchanged after a successful refresh. | UI | Missing | Partial | High |
 
 ### Store isolation and request consistency
 

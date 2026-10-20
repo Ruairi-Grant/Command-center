@@ -361,6 +361,16 @@ def main():
 
         check("header exposes UI version and local refresh time; top form supports all item types", c9)
 
+        def c10():
+            return ("window.scrollY" in html
+                    and "window.scrollTo(0, scrollY)" in html
+                    and "details[data-org-id][open]" in html
+                    and "data-org-id=\"" in html
+                    and "expandedIds" in html
+                    and "renderOrganisation(currentOrganisation, expandedIds)" in html)
+
+        check("background refresh preserves scroll position and collapsed organisation sections", c10)
+
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],
                                capture_output=True, text=True, timeout=180)
