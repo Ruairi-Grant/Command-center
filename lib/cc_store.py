@@ -667,6 +667,10 @@ def _validate_parent_relationship(kind, parent_id, home, moving_id=None):
     }
     if kind not in allowed or parent_kind not in allowed[kind]:
         raise CCError("%s cannot have parent kind %s" % (kind, parent_kind))
+    if kind == "task" and parent_kind == "task":
+        grandparent = by_id.get(parent.get("parent_id"))
+        if grandparent is not None and grandparent.get("kind") == "task":
+            raise CCError("a subtask cannot own another subtask")
     seen = set()
     cursor = parent
     while cursor is not None:
@@ -967,6 +971,7 @@ def _organisation_tree(tasks, goals):
             "id": rec["id"],
             "title": rec.get("title", ""),
             "kind": rec.get("kind"),
+            "parent_id": rec.get("parent_id"),
             "status": rec.get("status"),
             "priority": rec.get("priority"),
             "due": effective_due,

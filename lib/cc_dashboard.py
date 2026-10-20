@@ -428,9 +428,16 @@ function renderOrganisation(organisation, expandedIds) {
 function buildParentOptions(organisation, kind, excludeId) {
   const options = ['<option value="">No parent</option>'];
   const allowed = kind === 'project' ? ['area'] : (kind === 'task' ? ['area', 'project', 'task'] : []);
+  const byId = {};
+  function index(nodes) {
+    nodes.forEach(n => { byId[n.id] = n; index(n.children || []); });
+  }
+  index(organisation);
   function walk(nodes, prefix) {
     nodes.forEach(n => {
-      if (n.id !== excludeId && allowed.includes(n.kind)) {
+      const parent = n.parent_id ? byId[n.parent_id] : null;
+      const isSubtask = n.kind === 'task' && parent && parent.kind === 'task';
+      if (n.id !== excludeId && allowed.includes(n.kind) && !isSubtask) {
         options.push('<option value="' + esc(n.id) + '">' + esc(prefix + n.title) + '</option>');
         walk(n.children || [], prefix + '↳ ');
       }

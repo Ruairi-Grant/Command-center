@@ -24,6 +24,7 @@ Hierarchy rules:
 * Areas cannot have parents.
 * Projects can belong to an area or the root.
 * Tasks can belong to an area, project, another task, or the root.
+* Subtasks (tasks that are part of a task) cannot be owned by a subtask, only a task, project or area.
 * Projects cannot contain projects initially.
 
 This keeps the model flexible without unnecessary complexity.

@@ -49,6 +49,16 @@ class HierarchyContractTests(IsolatedStoreTestCase):
                                              parent_id=parent_id)
             self.assertEqual(record["parent_id"], parent_id)
 
+    def test_HIER_009_subtasks_cannot_own_subtasks(self):
+        root_task = cc.create_organisation("test", title="Root task", kind="task")
+        subtask = cc.create_organisation("test", title="Subtask", kind="task",
+                                         parent_id=root_task["id"])
+        with self.assertRaises(cc.CCError):
+            cc.create_organisation("test", title="Nested subtask", kind="task",
+                                   parent_id=subtask["id"])
+        with self.assertRaises(cc.CCError):
+            cc.update_organisation("test", root_task["id"], parent_id=subtask["id"])
+
     def test_HIER_005_circular_parent_move_is_rejected(self):
         area = cc.create_organisation("test", title="Area", kind="area")
         task = cc.create_organisation("test", title="Task", kind="task",

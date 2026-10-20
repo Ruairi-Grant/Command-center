@@ -60,6 +60,7 @@ def main():
         assert "ntSubmit.textContent = 'Save changes'" in html
         assert "orgEditor" not in html
         assert "id=\"org-due\"" not in html
+        assert "const isSubtask" in html
         print("ALL ORGANISATION UI TESTS PASSED")
         return 0
     finally:

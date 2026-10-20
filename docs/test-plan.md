@@ -42,6 +42,7 @@ Implementation meanings:
 | HIER-004 | Parent references remain valid and parent choices are type-filtered. | Unknown parent; deleted/missing parent; UI selector only offers valid parents. | Unit/API/UI | Partial | Partial | High |
 | HIER-005 | Circular hierarchies are rejected. | Item as its own parent; ancestor moved under descendant; multi-level cycle. | Unit/API | Missing | Missing | High |
 | HIER-006 | Moving an item preserves its ID/history and recalculates hierarchy-derived values. | Move task between projects; move to root; move under area; reject invalid move. | Unit/API | Missing | Missing | High |
+| HIER-009 | A subtask cannot own another subtask. | Create a task under a task; reject a task under that subtask; reject moving a task beneath a subtask. | Unit/API/UI | Covered | Implemented | High |
 | HIER-007 | An item with children cannot be deleted. | Attempt parent deletion; verify no mutation; delete/move children individually, then delete parent. | Unit/API | Missing | Missing | High |
 | HIER-008 | Hierarchy is unordered and supports expansion/collapse. | Stable structural rendering; nested branches; no ordering semantics in labels or controls. | UI | Partial | Partial | Medium |
 
