@@ -388,6 +388,12 @@ def main():
 
         check("organisation completion is direct, visible, and undo-capable without confirmation", c12)
 
+        def c13():
+            return (".toast.show { opacity: 1; pointer-events: auto; }" in html
+                    and "button[data-undo-id]" in html)
+
+        check("Undo toast accepts pointer input", c13)
+
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],
                                capture_output=True, text=True, timeout=180)

@@ -198,7 +198,7 @@ PAGE = """<!doctype html>
            background: #1d2330; border: 1px solid #333c4e; padding: 9px 18px;
            border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .25s;
            pointer-events: none; }
-  .toast.show { opacity: 1; }
+  .toast.show { opacity: 1; pointer-events: auto; }
   .toast.err { border-color: #f4877f; color: #f4877f; }
   .stamp { font-size: 11px; color: #5c6478; }
   .organisation { margin: 18px 0 24px; }
