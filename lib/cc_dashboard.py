@@ -200,11 +200,6 @@ PAGE = """<!doctype html>
            pointer-events: none; }
   .toast.show { opacity: 1; }
   .toast.err { border-color: #f4877f; color: #f4877f; }
-  .goal { padding: 10px 2px; border-bottom: 1px solid #21273480; }
-  .goal:last-child { border-bottom: none; }
-  .goal b { font-size: 14px; font-weight: 600; }
-  .goal ul { margin-top: 6px; padding-left: 18px; list-style: disc; }
-  .goal li { border: none; padding: 2px 0; font-size: 13px; color: #b6bdcf; }
   .stamp { font-size: 11px; color: #5c6478; }
   .organisation { margin: 18px 0 24px; }
   .organisation h2 { margin-top: 0; }
@@ -335,16 +330,6 @@ function taskLi(t, today) {
     + '<span class="title">' + esc(t.title) + '</span>'
     + '<span class="due' + (overdue ? ' over' : '') + '">' + label + '</span>'
     + '<button data-id="' + esc(t.id) + '">Done</button>'
-    + '</li>';
-}
-
-function commitLi(c, today) {
-  const overdue = c.due && c.due < today;
-  return '<li>'
-    + '<span class="title">' + esc(c.what)
-    + (c.whom ? ' <span class="due">with ' + esc(c.whom) + '</span>' : '') + '</span>'
-    + '<span class="due' + (overdue ? ' over' : '') + '">' + esc(c.due || '') + '</span>'
-    + '<button data-cid="' + esc(c.id) + '">Done</button>'
     + '</li>';
 }
 
@@ -528,19 +513,6 @@ async function load() {
   html += section('Overdue', s.overdue, taskLi, s.today);
   html += section('Due today', s.today_tasks, taskLi, s.today);
   html += section('Upcoming (7 days)', s.upcoming_tasks, taskLi, s.today);
-  html += section('Commitments overdue', s.commitments.overdue, commitLi, s.today);
-  html += section('Commitments upcoming', s.commitments.upcoming, commitLi, s.today);
-  html += section('Commitments no date', s.commitments.no_date, commitLi, s.today);
-  html += '<h2>Active goals <span class="count">(' + s.goals.length + ')</span></h2><div class="card">';
-  html += s.goals.length
-    ? s.goals.map(g =>
-        '<div class="goal"><b>' + esc(g.title) + '</b>'
-        + ((g.next_actions || []).length
-            ? '<ul>' + g.next_actions.map(a => '<li>' + esc(a) + '</li>').join('') + '</ul>'
-            : '')
-        + '</div>').join('')
-    : '<div class="empty">No active goals.</div>';
-  html += '</div>';
   list.innerHTML = html;   // render into #list, never clobber the form
 }
 
@@ -643,12 +615,12 @@ toast.addEventListener('click', async (ev) => {
 // and only act on buttons that actually carry a record id.
 app.addEventListener('click', async (ev) => {
   if (form.contains(ev.target)) return;      // form handles its own controls
-  const b = ev.target.closest('button[data-id], button[data-cid]');
+  const b = ev.target.closest('button[data-id]');
   if (!b) return;
-  const taskId = b.dataset.id, commitId = b.dataset.cid;
-  if (taskId && !window.confirm('Complete this task?')) return;
-  const url = taskId ? '/api/tasks/complete' : '/api/commitments/complete';
-  const body = JSON.stringify({ id: taskId || commitId });
+  const taskId = b.dataset.id;
+  if (!window.confirm('Complete this task?')) return;
+  const url = '/api/tasks/complete';
+  const body = JSON.stringify({ id: taskId });
   b.disabled = true;
   try {
     const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body });
