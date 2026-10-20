@@ -354,7 +354,10 @@ def main():
                     and ".slice(11,16)" not in html
                     and "data-ui-version" in html
                     and "__UI_VERSION__" not in html
-                    and "UI v" in html)
+                    and "UI v" in html
+                    and "id=\"org-editor\"" not in html
+                    and "startUnifiedEdit" in html
+                    and "'/api/organisation/update'" in html)
 
         check("header exposes UI version and local refresh time; top form supports all item types", c9)
 

@@ -219,11 +219,6 @@ PAGE = """<!doctype html>
   .org-due { margin: 8px 0 6px 22px; font-size: 13px; color: #d4b978; }
   .org-children { margin: 12px 0 0 20px; }
   .org-action { font-size: 10px; padding: 2px 6px; margin-left: 5px; }
-  .org-editor { background: #161a24; border: 1px solid #262c3a; border-radius: 10px; padding: 12px; margin-bottom: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-  .org-editor[hidden] { display: none; }
-  .org-editor label { font-size: 11px; color: #8b93a5; display: flex; flex-direction: column; gap: 3px; }
-  .org-editor input, .org-editor select { font: inherit; font-size: 13px; padding: 6px; border-radius: 6px; border: 1px solid #333c4e; background: #1d2330; color: #e6e8ee; }
-  .org-editor .org-editor-actions { display: flex; gap: 8px; align-items: end; }
   form.newtask { background: #161a24; border: 1px solid #262c3a; border-radius: 10px;
                  padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   form.newtask .field { display: flex; flex-direction: column; gap: 4px; }
@@ -247,6 +242,7 @@ PAGE = """<!doctype html>
 </header>
 <main id="app">
   <form class="newtask" id="newtask" autocomplete="off">
+    <input id="nt-id" type="hidden">
     <div class="field" style="flex:0 0 130px">
       <label for="nt-kind">Item type</label>
       <select id="nt-kind" name="kind">
@@ -280,22 +276,12 @@ PAGE = """<!doctype html>
       <label for="nt-notes">Notes</label>
       <input id="nt-notes" name="notes" type="text" maxlength="2000" placeholder="Optional">
     </div>
-    <button type="submit">Add item</button>
+    <button id="nt-submit" type="submit">Add item</button>
+    <button id="nt-cancel" type="button" hidden>Cancel edit</button>
     <span class="hint">Create an area, project, task, or subtask</span>
   </form>
   <section class="organisation" id="organisation">
-    <h2>Organisation <button id="org-add" class="org-action" type="button">Add organisation item</button></h2>
-    <form class="org-editor" id="org-editor" hidden>
-      <input id="org-id" type="hidden">
-      <input id="org-parent" type="hidden">
-      <label id="org-parent-wrap">Parent<select id="org-parent-select"></select></label>
-      <label>Title<input id="org-title" required maxlength="500"></label>
-      <label>Type<select id="org-kind"><option value="area">Area</option><option value="project">Project</option><option value="task">Task</option></select></label>
-      <label id="org-status-wrap">Status<select id="org-status"></select></label>
-      <label id="org-due-wrap">Due date<input id="org-due" type="date"></label>
-      <label id="org-waiting-wrap">Waiting on<input id="org-waiting"></label>
-      <div class="org-editor-actions"><button type="submit">Save</button><button id="org-cancel" type="button">Cancel</button></div>
-    </form>
+    <h2>Organisation <button id="org-add" class="org-action" type="button">Add item</button></h2>
     <div class="org-tree" id="organisation-tree"><div class="empty">Loading…</div></div>
   </section>
   <div id="list"><div class="empty">Loading…</div></div>
@@ -305,28 +291,19 @@ PAGE = """<!doctype html>
 const app = document.getElementById('app');
 const list = document.getElementById('list');
 const form = document.getElementById('newtask');
+const ntId = document.getElementById('nt-id');
 const ntKind = document.getElementById('nt-kind');
 const ntKindStatus = document.getElementById('nt-status');
+const ntDue = document.getElementById('nt-due');
 const ntDueWrap = document.getElementById('nt-due-wrap');
 const ntStatusWrap = document.getElementById('nt-status-wrap');
 const ntWaitingWrap = document.getElementById('nt-waiting-wrap');
 const ntWaiting = document.getElementById('nt-waiting');
 const ntParent = document.getElementById('nt-parent');
+const ntSubmit = document.getElementById('nt-submit');
+const ntCancel = document.getElementById('nt-cancel');
 const orgTree = document.getElementById('organisation-tree');
-const orgEditor = document.getElementById('org-editor');
 const orgAdd = document.getElementById('org-add');
-const orgId = document.getElementById('org-id');
-const orgParent = document.getElementById('org-parent');
-const orgParentWrap = document.getElementById('org-parent-wrap');
-const orgParentSelect = document.getElementById('org-parent-select');
-const orgTitle = document.getElementById('org-title');
-const orgKind = document.getElementById('org-kind');
-const orgStatus = document.getElementById('org-status');
-const orgStatusWrap = document.getElementById('org-status-wrap');
-const orgDueWrap = document.getElementById('org-due-wrap');
-const orgWaitingWrap = document.getElementById('org-waiting-wrap');
-const orgDue = document.getElementById('org-due');
-const orgWaiting = document.getElementById('org-waiting');
 const meta = document.getElementById('meta');
 const store = document.getElementById('store');
 const toast = document.getElementById('toast');
@@ -393,37 +370,38 @@ function syncNewItemFields() {
   ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
 }
 
-function statusOptions(kind) {
-  const values = kind === 'project'
+function resetUnifiedForm() {
+  ntId.value = '';
+  form.reset();
+  ntKind.value = 'task';
+  ntKind.disabled = false;
+  ntSubmit.textContent = 'Add item';
+  ntCancel.hidden = true;
+  syncNewItemFields();
+  ntParent.innerHTML = buildParentOptions(currentOrganisation, 'task', '');
+}
+
+function startUnifiedEdit(node) {
+  if (!node) return;
+  ntId.value = node.id;
+  ntKind.value = node.kind;
+  ntKind.disabled = true;
+  ntKindStatus.innerHTML = (node.kind === 'project'
     ? ['active', 'done', 'cancelled']
-    : ['active', 'waiting', 'done', 'cancelled'];
-  orgStatus.innerHTML = values.map(v => '<option value="' + v + '">' + v + '</option>').join('');
-  orgStatusWrap.hidden = kind === 'area';
-  orgWaitingWrap.hidden = kind !== 'task' || orgStatus.value !== 'waiting';
-}
-
-function showOrganisationEditor(node, parentId) {
-  const editing = Boolean(node);
-  orgId.value = editing ? node.id : '';
-  orgParent.value = parentId || (editing ? (node.parent_id || '') : '');
-  orgParentSelect.value = parentId || (editing ? (node.parent_id || '') : '');
-  orgParentWrap.hidden = false;
-  orgTitle.value = editing ? node.title : '';
-  orgKind.value = editing ? node.kind : (parentId ? 'task' : 'area');
-  orgKind.disabled = editing;
-  statusOptions(orgKind.value);
-  orgStatus.value = editing ? (node.status || 'active') : (orgKind.value === 'project' ? 'active' : 'active');
-  orgDue.value = editing ? (node.due_source === 'explicit' ? (node.due || '') : '') : '';
-  orgDueWrap.hidden = orgKind.value !== 'project';
-  orgWaiting.value = editing ? (node.waiting_on || '') : '';
-  orgWaitingWrap.hidden = orgKind.value !== 'task' || orgStatus.value !== 'waiting';
-  orgEditor.hidden = false;
-  orgTitle.focus();
-}
-
-function closeOrganisationEditor() {
-  orgEditor.hidden = true;
-  orgKind.disabled = false;
+    : ['active', 'waiting', 'done', 'cancelled'])
+    .map(v => '<option value="' + v + '">' + v + '</option>').join('');
+  ntKindStatus.value = node.status || 'active';
+  syncNewItemFields();
+  document.getElementById('nt-title').value = node.title || '';
+  ntDue.value = node.due_source === 'explicit' ? (node.due || '') : '';
+  ntWaiting.value = node.waiting_on || '';
+  document.getElementById('nt-notes').value = node.notes || '';
+  ntParent.innerHTML = buildParentOptions(currentOrganisation, node.kind, node.id);
+  ntParent.value = node.parent_id || '';
+  ntSubmit.textContent = 'Save changes';
+  ntCancel.hidden = false;
+  form.scrollIntoView({behavior: 'smooth', block: 'start'});
+  document.getElementById('nt-title').focus();
 }
 
 function orgControls(n) {
@@ -462,8 +440,9 @@ function buildParentOptions(organisation, kind, excludeId) {
 }
 
 function populateParentOptions(organisation) {
-  ntParent.innerHTML = buildParentOptions(organisation, 'task', '');
-  orgParentSelect.innerHTML = buildParentOptions(organisation, orgKind.value, orgId.value);
+  const selected = ntParent.value;
+  ntParent.innerHTML = buildParentOptions(organisation, ntKind.value, ntId.value);
+  if ([...ntParent.options].some(option => option.value === selected)) ntParent.value = selected;
 }
 
 function findOrganisationNode(nodes, id) {
@@ -475,25 +454,17 @@ function findOrganisationNode(nodes, id) {
   return null;
 }
 
-function syncOrganisationDueField() {
-  orgDueWrap.hidden = orgKind.value !== 'project';
-}
-
 ntKind.addEventListener('change', () => {
   syncNewItemFields();
-  ntParent.innerHTML = buildParentOptions(currentOrganisation, ntKind.value, '');
+  populateParentOptions(currentOrganisation);
 });
 ntKindStatus.addEventListener('change', syncNewItemFields);
-
-orgKind.addEventListener('change', () => {
-  statusOptions(orgKind.value);
-  populateParentOptions(currentOrganisation);
-  syncOrganisationDueField();
+ntCancel.addEventListener('click', resetUnifiedForm);
+orgAdd.addEventListener('click', () => {
+  resetUnifiedForm();
+  form.scrollIntoView({behavior: 'smooth', block: 'start'});
+  document.getElementById('nt-title').focus();
 });
-orgStatus.addEventListener('change', () => {
-  orgWaitingWrap.hidden = orgKind.value !== 'task' || orgStatus.value !== 'waiting';
-});
-orgAdd.addEventListener('click', () => showOrganisationEditor(null, null));
 orgTree.addEventListener('click', async (ev) => {
   const del = ev.target.closest('button[data-org-delete]');
   if (del) {
@@ -513,33 +484,8 @@ orgTree.addEventListener('click', async (ev) => {
   const edit = ev.target.closest('button[data-org-edit]');
   if (edit) {
     ev.stopPropagation();
-    showOrganisationEditor(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit), null);
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit));
   }
-});
-
-document.getElementById('org-cancel').addEventListener('click', closeOrganisationEditor);
-orgEditor.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const editing = Boolean(orgId.value);
-  const body = { title: orgTitle.value.trim(), parent_id: orgParentSelect.value || null };
-  if (orgKind.value !== 'area') body.status = orgStatus.value;
-  if (orgKind.value === 'task') body.waiting_on = orgWaiting.value.trim() || null;
-  if (orgKind.value === 'project') body.due = orgDue.value || null;
-  if (orgKind.value === 'task' && orgStatus.value === 'waiting' && !body.waiting_on) {
-    say('Waiting on is required for waiting tasks', true); return;
-  }
-  if (!body.title) { say('Title is required', true); return; }
-  const url = editing ? '/api/organisation/update' : '/api/organisation/create';
-  if (editing) body.id = orgId.value;
-  else body.kind = orgKind.value;
-  try {
-    const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    closeOrganisationEditor();
-    say(editing ? 'Updated' : 'Added');
-    load();
-  } catch (e) { say('Save failed: ' + e.message, true); }
 });
 
 async function load() {
@@ -634,19 +580,20 @@ form.addEventListener('submit', async (ev) => {
     say('Waiting on is required for waiting tasks', true); return;
   }
   if (!payload.title) { say('Title is required', true); return; }
+  const editing = Boolean(ntId.value);
+  const url = editing ? '/api/organisation/update' : '/api/organisation/create';
+  if (editing) payload.id = ntId.value;
   const btn = form.querySelector('button[type=submit]');
   btn.disabled = true;
   try {
-    const r = await fetch('/api/organisation/create', {
+    const r = await fetch(url, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify(payload),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    say('Added: ' + (j.record ? j.record.title : kind));
-    form.reset();
-    ntKind.value = 'task';
-    syncNewItemFields();
+    say(editing ? 'Saved changes' : 'Added: ' + (j.record ? j.record.title : kind));
+    resetUnifiedForm();
     load();
   } catch (e) {
     say('Failed: ' + e.message, true);
