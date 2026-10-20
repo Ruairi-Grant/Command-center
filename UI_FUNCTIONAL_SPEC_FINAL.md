@@ -113,6 +113,16 @@ Items can be expanded and collapsed through several nesting levels. All active t
 
 Completed and cancelled items are hidden from the default view but remain in the data store. An initial history toggle is not required.
 
+Each active Task and Project displays a completion control directly in its hierarchy row, without requiring the user to open the editor.
+
+* The control allows the user to mark the item Done.
+* Completion follows the lifecycle and confirmation rules defined in Section 7.
+* A parent with unfinished children cannot be completed; the UI must explain why.
+* After successful completion, the item disappears from the active hierarchy.
+* The completion action provides an opportunity to Undo, restoring the item to its previous status.
+* Completion must preserve the current expanded/collapsed state and scroll position of the Organisation view.
+* Areas do not have a completion control.
+
 ## 7\. Editing and moving
 
 Edit opens the unified editor populated with the item’s current values.
@@ -137,12 +147,15 @@ Moving an item must:
 
 Completion behavior:
 
-* Tasks and projects can be marked Done.
-* A parent cannot be marked Done or Cancelled while it has unfinished children.
-* The user must resolve unfinished children first.
-* This prevents active work from being hidden and avoids unexpected cascading changes.
-* Completing an item requires confirmation and provides an Undo action in that confirmation.
-* Completed items leave the active view, while their status and completion time remain stored.
+* Tasks and projects can be marked Done directly from the Organisation view, date views (where applicable), or the editor.
+* Completing an item does not require confirmation.
+* A parent cannot be marked Done or Cancelled while it has unfinished children. The user must resolve unfinished children first.
+* Successful completion immediately removes the item from active views.
+* Completion stores the item's Done status and completion timestamp.
+* A temporary success notification provides an Undo action.
+* Undo restores the item's previous status and clears its completion timestamp.
+* If completion fails, the item must remain visible and an error must be displayed.
+* Completing or undoing an item must not reset the current scroll position, expanded/collapsed branches, or unsaved form inputs.
 
 Deletion behavior:
 

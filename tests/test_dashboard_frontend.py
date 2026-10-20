@@ -378,6 +378,16 @@ def main():
 
         check("unified form can clear a selected due date", c11)
 
+        def c12():
+            return ("data-org-complete" in html
+                    and "window.confirm('Complete this task?')" not in html
+                    and "'Done'" in html
+                    and "'/api/tasks/restore'" in html
+                    and "'/api/tasks/complete'" in html
+                    and "startUnifiedEdit" in html)
+
+        check("organisation completion is direct, visible, and undo-capable without confirmation", c12)
+
         def c8():
             p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],
                                capture_output=True, text=True, timeout=180)

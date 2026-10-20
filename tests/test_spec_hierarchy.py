@@ -77,12 +77,50 @@ class LifecycleContractTests(IsolatedStoreTestCase):
         with self.assertRaises(cc.CCError):
             cc.update_organisation("test", project["id"], status="done")
         with self.assertRaises(cc.CCError):
+            cc.update_organisation("test", project["id"], status="cancelled")
+        with self.assertRaises(cc.CCError):
             cc.delete_organisation("test", project["id"])
         cc.complete_task("test", child["id"])
         done = cc.update_organisation("test", project["id"], status="done")
         self.assertEqual(done["status"], "done")
         with self.assertRaises(cc.CCError):
             cc.delete_organisation("test", project["id"])
+
+    def test_LIFE_006_undo_restores_previous_status_for_waiting_task(self):
+        task = cc.create_organisation("test", title="Blocked", kind="task",
+                                      status="waiting", waiting_on="A response")
+        completed = cc.complete_task("test", task["id"])
+        self.assertEqual(completed["status"], "done")
+        self.assertIsNotNone(completed["completed_at"])
+        restored = cc.restore_task("test", task["id"])
+        self.assertEqual(restored["status"], "waiting")
+        self.assertEqual(restored["waiting_on"], "A response")
+        self.assertIsNone(restored["completed_at"])
+
+    def test_LIFE_007_done_and_cancelled_items_are_hidden_but_stored(self):
+        done = cc.create_organisation("test", title="Done task", kind="task")
+        cancelled = cc.create_organisation("test", title="Cancelled task", kind="task")
+        cc.complete_task("test", done["id"])
+        cc.update_organisation("test", cancelled["id"], status="cancelled")
+        state = cc.build_state()
+        tree_ids = set()
+        def collect(nodes):
+            for node in nodes:
+                tree_ids.add(node["id"])
+                collect(node.get("children", []))
+        collect(state["organisation"])
+        self.assertNotIn(done["id"], tree_ids)
+        self.assertNotIn(cancelled["id"], tree_ids)
+        self.assertEqual(cc._find(cc.load_kind("tasks"), done["id"])["status"], "done")
+        self.assertEqual(cc._find(cc.load_kind("tasks"), cancelled["id"])["status"], "cancelled")
+
+    def test_LIFE_008_project_completion_has_timestamp_and_can_be_undone(self):
+        project = cc.create_organisation("test", title="Project", kind="project")
+        completed = cc.update_organisation("test", project["id"], status="done")
+        self.assertIsNotNone(completed.get("completed_at"))
+        restored = cc.update_organisation("test", project["id"], status="active")
+        self.assertEqual(restored["status"], "active")
+        self.assertIsNone(restored.get("completed_at"))
 
     def test_DATE_003_waiting_tasks_are_also_in_effective_date_view(self):
         due = (cc.today() - dt.timedelta(days=1)).isoformat()
