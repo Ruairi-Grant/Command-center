@@ -1003,6 +1003,7 @@ def build_state(home=None):
     return {
         "generated_at": iso_now(),
         "today": day.isoformat(),
+        "waiting": [t for t in active if t.get("status") == "waiting"],
         "today_tasks": [t for t in active if t.get("due") == day.isoformat()],
         "overdue": [t for t in active if due_on_or_before(t, day) and t.get("due") < day.isoformat()],
         "upcoming_tasks": [t for t in active if t.get("due") and day.isoformat() < t["due"] <= soon],

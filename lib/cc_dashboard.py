@@ -521,6 +521,7 @@ async function load() {
   orgTree.innerHTML = renderOrganisation(currentOrganisation);
   updateStore();
   let html = '';
+  html += section('Waiting', s.waiting || [], taskLi, s.today);
   html += section('Overdue', s.overdue, taskLi, s.today);
   html += section('Due today', s.today_tasks, taskLi, s.today);
   html += section('Upcoming (7 days)', s.upcoming_tasks, taskLi, s.today);

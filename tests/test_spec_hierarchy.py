@@ -7,6 +7,7 @@ assertions or changing product code in the test-infrastructure phase.
 """
 import sys
 import os
+import datetime as dt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -72,6 +73,14 @@ class LifecycleContractTests(IsolatedStoreTestCase):
         self.assertEqual(done["status"], "done")
         with self.assertRaises(cc.CCError):
             cc.delete_organisation("test", project["id"])
+
+    def test_DATE_003_waiting_tasks_are_also_in_effective_date_view(self):
+        due = (cc.today() - dt.timedelta(days=1)).isoformat()
+        task = cc.create_organisation("test", title="Blocked", kind="task",
+                                      status="waiting", waiting_on="Response", due=due)
+        state = cc.build_state()
+        self.assertIn(task["id"], [t["id"] for t in state["waiting"]])
+        self.assertIn(task["id"], [t["id"] for t in state["overdue"]])
 
     def test_LIFE_005_completion_can_be_restored(self):
         task = cc.create_organisation("test", title="Task", kind="task")
