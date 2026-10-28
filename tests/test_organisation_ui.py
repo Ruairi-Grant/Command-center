@@ -16,6 +16,25 @@ PORT = 8898
 BASE = "http://127.0.0.1:%d" % PORT
 
 
+def post_json(url, payload):
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+    with urllib.request.urlopen(req, timeout=10) as response:
+        return response.status, json.loads(response.read().decode())
+
+
+def find_node(nodes, node_id):
+    for node in nodes:
+        if node["id"] == node_id:
+            return node
+        found = find_node(node.get("children", []), node_id)
+        if found:
+            return found
+    return None
+
+
 def main():
     root = Path(tempfile.mkdtemp(prefix="cc-org-ui-"))
     prod = root / "command-center-prod"
@@ -35,8 +54,57 @@ def main():
 
         with urllib.request.urlopen(BASE + "/api/state", timeout=10) as response:
             state = json.loads(response.read().decode())
+        assert state["organisation"] == []
+
+        status, area_result = post_json(BASE + "/api/organisation/create", {
+            "kind": "area", "title": "Notes area", "notes": "Area note"
+        })
+        assert status == 201
+        area_id = area_result["record"]["id"]
+        status, project_result = post_json(BASE + "/api/organisation/create", {
+            "kind": "project", "title": "Notes project", "parent_id": area_id,
+            "notes": "Project note"
+        })
+        assert status == 201
+        project_id = project_result["record"]["id"]
+        status, task_result = post_json(BASE + "/api/organisation/create", {
+            "kind": "task", "title": "Notes task", "parent_id": project_id,
+            "notes": "Task note"
+        })
+        assert status == 201
+        task_id = task_result["record"]["id"]
+
+        with urllib.request.urlopen(BASE + "/api/state", timeout=10) as response:
+            state = json.loads(response.read().decode())
         org = state["organisation"]
         assert isinstance(org, list)
+        area_node = find_node(org, area_id)
+        project_node = find_node(org, project_id)
+        task_node = find_node(org, task_id)
+        assert area_node["notes"] == "Area note"
+        assert project_node["notes"] == "Project note"
+        assert task_node["notes"] == "Task note"
+        status, updated = post_json(BASE + "/api/organisation/update", {
+            "id": task_id, "notes": "Updated task note"
+        })
+        assert status == 200 and updated["record"]["notes"] == "Updated task note"
+        with urllib.request.urlopen(BASE + "/api/state", timeout=10) as response:
+            state = json.loads(response.read().decode())
+        assert find_node(state["organisation"], task_id)["notes"] == "Updated task note"
+        status, done_child_result = post_json(BASE + "/api/organisation/create", {
+            "kind": "task", "title": "Completed child", "parent_id": project_id,
+            "notes": "Completed note"
+        })
+        assert status == 201
+        done_child_id = done_child_result["record"]["id"]
+        status, _ = post_json(BASE + "/api/tasks/complete", {"id": done_child_id})
+        assert status == 200
+        with urllib.request.urlopen(BASE + "/api/state", timeout=10) as response:
+            state = json.loads(response.read().decode())
+        project_node = find_node(state["organisation"], project_id)
+        child_headers = {child["id"]: child for child in project_node["child_headers"]}
+        assert child_headers[done_child_id]["title"] == "Completed child"
+        assert child_headers[done_child_id]["status"] == "done"
         assert all("children" in node and "kind" in node for node in org)
 
         with urllib.request.urlopen(BASE + "/", timeout=10) as response:
@@ -61,6 +129,21 @@ def main():
         assert "orgEditor" not in html
         assert "id=\"org-due\"" not in html
         assert "const isSubtask" in html
+        assert 'id="org-detail"' in html
+        assert 'id="org-detail-notes"' in html
+        assert 'data-org-open' in html
+        assert "openOrganisationDetail" in html
+        assert "Children" in html
+        assert "child_headers" in html
+        assert "data-org-detail-child" in html
+        render_start = html.index("function renderOrganisation(")
+        render_end = html.index("function buildParentOptions", render_start)
+        assert "notes" not in html[render_start:render_end]
+        org_click_start = html.index("orgTree.addEventListener('click'")
+        org_click_end = html.index("async function load()", org_click_start)
+        org_click_src = html[org_click_start:org_click_end]
+        assert "data-org-open" in org_click_src
+        assert "ev.stopPropagation()" in org_click_src
         print("ALL ORGANISATION UI TESTS PASSED")
         return 0
     finally:

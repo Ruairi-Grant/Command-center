@@ -214,6 +214,27 @@ PAGE = """<!doctype html>
   .org-due { margin: 8px 0 6px 22px; font-size: 13px; color: #d4b978; }
   .org-children { margin: 12px 0 0 20px; }
   .org-action { font-size: 10px; padding: 2px 6px; margin-left: 5px; }
+  .org-open, .task-open { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; font: inherit; text-align: left; }
+  .org-open:hover, .task-open:hover { text-decoration: underline; }
+  .detail-backdrop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    padding: 20px; background: rgba(0,0,0,.62); z-index: 20; }
+  .detail-backdrop.open { display: flex; }
+  .detail-window { width: min(680px, 100%); max-height: min(760px, 90vh); overflow: auto;
+    background: #161a24; border: 1px solid #3a455c; border-radius: 12px; padding: 18px;
+    box-shadow: 0 20px 70px rgba(0,0,0,.45); }
+  .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+  .detail-header h2 { margin: 0; font-size: 21px; }
+  .detail-meta, .detail-notes, .detail-children { margin-top: 16px; }
+  .detail-meta { color: #aeb7c9; font-size: 13px; }
+  .detail-notes { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; min-height: 42px;
+    background: #1d2330; border: 1px solid #2b3344; border-radius: 7px; }
+  .detail-children h3 { margin: 0 0 8px; font-size: 14px; }
+  .detail-child { display: block; width: 100%; margin: 5px 0; padding: 9px 10px; text-align: left;
+    background: #1d2330; border: 1px solid #333c4e; border-radius: 6px; color: #e6e8ee; cursor: pointer; }
+  .detail-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 18px; }
+  .detail-actions .org-action { margin-left: 0; font-size: 12px; padding: 6px 10px; }
+  .detail-actions .danger { border-color: #8a4545; color: #f4877f; }
+
   form.newtask { background: #161a24; border: 1px solid #262c3a; border-radius: 10px;
                  padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   form.newtask .field { display: flex; flex-direction: column; gap: 4px; }
@@ -283,6 +304,19 @@ PAGE = """<!doctype html>
   <div id="list"><div class="empty">Loading…</div></div>
 </main>
 <div class="toast" id="toast"></div>
+<div class="detail-backdrop" id="org-detail" hidden>
+  <section class="detail-window" role="dialog" aria-modal="true" aria-labelledby="org-detail-title">
+    <div class="detail-header">
+      <h2 id="org-detail-title">Item details</h2>
+      <button id="org-detail-close" type="button">Close</button>
+    </div>
+    <div class="detail-meta" id="org-detail-meta"></div>
+    <h3>Notes</h3>
+    <div class="detail-notes" id="org-detail-notes"></div>
+    <div class="detail-children" id="org-detail-children"></div>
+    <div class="detail-actions" id="org-detail-actions"></div>
+  </section>
+</div>
 <script>
 const app = document.getElementById('app');
 const list = document.getElementById('list');
@@ -304,6 +338,13 @@ const orgAdd = document.getElementById('org-add');
 const meta = document.getElementById('meta');
 const store = document.getElementById('store');
 const toast = document.getElementById('toast');
+const orgDetail = document.getElementById('org-detail');
+const orgDetailTitle = document.getElementById('org-detail-title');
+const orgDetailMeta = document.getElementById('org-detail-meta');
+const orgDetailNotes = document.getElementById('org-detail-notes');
+const orgDetailChildren = document.getElementById('org-detail-children');
+const orgDetailActions = document.getElementById('org-detail-actions');
+const orgDetailClose = document.getElementById('org-detail-close');
 let toastTimer;
 let currentOrganisation = [];
 
@@ -327,7 +368,7 @@ function taskLi(t, today) {
   const label = overdue ? 'Overdue' : (t.due === today ? 'Due today' : esc(t.due || ''));
   return '<li>'
     + '<span class="prio ' + prio + '">' + prio + '</span>'
-    + '<span class="title">' + esc(t.title) + '</span>'
+    + '<button class="task-open" type="button" data-org-open="' + esc(t.id) + '">' + esc(t.title) + '</button>'
     + '<span class="due' + (overdue ? ' over' : '') + '">' + label + '</span>'
     + '<button data-id="' + esc(t.id) + '" data-previous-status="' + esc(t.status || 'active') + '">Done</button>'
     + '</li>';
@@ -398,9 +439,37 @@ function orgControls(n) {
     + '<button class="org-action danger" type="button" data-org-delete="' + esc(n.id) + '">Delete</button>';
 }
 
+function openOrganisationDetail(id) {
+  const node = findOrganisationNode(currentOrganisation, id);
+  if (!node) return;
+  orgDetail.dataset.nodeId = node.id;
+  orgDetailTitle.textContent = node.title;
+  const status = node.kind === 'area' ? '' : ' · ' + (node.status || '');
+  const due = node.due ? ' · Due ' + node.due + (node.due_source === 'inherited' ? ' (inherited)' : '') : '';
+  const waiting = node.waiting_on ? ' · Waiting on ' + node.waiting_on : '';
+  orgDetailMeta.textContent = node.kind + status + due + waiting;
+  orgDetailNotes.innerHTML = node.notes ? esc(node.notes) : '<span class="empty">No notes.</span>';
+  const children = node.child_headers || node.children || [];
+  orgDetailChildren.innerHTML = children.length
+    ? '<h3>Children</h3>' + children.map(child =>
+        '<button class="detail-child" type="button" data-org-detail-child="' + esc(child.id) + '">' +
+        esc(child.title) + ' · ' + esc(child.kind) + (child.status ? ' · ' + esc(child.status) : '') + '</button>').join('')
+    : '';
+  orgDetailActions.innerHTML = orgControls(node);
+  orgDetail.hidden = false;
+  orgDetail.classList.add('open');
+  orgDetailClose.focus();
+}
+
+function closeOrganisationDetail() {
+  orgDetail.classList.remove('open');
+  orgDetail.hidden = true;
+  delete orgDetail.dataset.nodeId;
+}
+
 function renderOrganisation(organisation, expandedIds) {
   function renderNode(n) {
-    const label = '<span class="org-label">' + esc(n.title) + '</span>'
+    const label = '<button class="org-open" type="button" data-org-open="' + esc(n.id) + '">' + esc(n.title) + '</button>'
       + '<span class="org-kind">' + esc(n.kind) + '</span>'
       + (n.kind === 'area' ? '' : '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>')
       + orgControls(n);
@@ -467,6 +536,13 @@ orgAdd.addEventListener('click', () => {
   document.getElementById('nt-title').focus();
 });
 orgTree.addEventListener('click', async (ev) => {
+  const opener = ev.target.closest('button[data-org-open]');
+  if (opener) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openOrganisationDetail(opener.dataset.orgOpen);
+    return;
+  }
   const complete = ev.target.closest('button[data-org-complete]');
   if (complete) {
     ev.stopPropagation();
@@ -503,6 +579,57 @@ orgTree.addEventListener('click', async (ev) => {
     ev.stopPropagation();
     startUnifiedEdit(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit));
   }
+});
+
+orgDetailClose.addEventListener('click', closeOrganisationDetail);
+orgDetail.addEventListener('click', async (ev) => {
+  if (ev.target === orgDetail) { closeOrganisationDetail(); return; }
+  ev.stopPropagation();
+  const child = ev.target.closest('button[data-org-detail-child]');
+  if (child) {
+    openOrganisationDetail(child.dataset.orgDetailChild);
+    return;
+  }
+  const complete = ev.target.closest('button[data-org-complete]');
+  if (complete) {
+    complete.disabled = true;
+    const kind = complete.dataset.orgKind;
+    const url = kind === 'task' ? '/api/tasks/complete' : '/api/organisation/update';
+    const body = kind === 'task' ? {id: complete.dataset.orgComplete} : {id: complete.dataset.orgComplete, status: 'done'};
+    try {
+      const r = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      closeOrganisationDetail();
+      say('Marked done', false, {id: complete.dataset.orgComplete, kind: kind});
+      load();
+    } catch (e) { complete.disabled = false; say('Failed: ' + e.message, true); }
+    return;
+  }
+  const del = ev.target.closest('button[data-org-delete]');
+  if (del) {
+    if (!window.confirm('Delete this item? Children must be moved or deleted first.')) return;
+    try {
+      const r = await fetch('/api/organisation/delete', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id: del.dataset.orgDelete}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      closeOrganisationDetail();
+      say('Deleted'); load();
+    } catch (e) { say('Delete failed: ' + e.message, true); }
+    return;
+  }
+  const edit = ev.target.closest('button[data-org-edit]');
+  if (edit) {
+    closeOrganisationDetail();
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit));
+  }
+});
+
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !orgDetail.hidden) closeOrganisationDetail();
 });
 
 async function load() {
@@ -635,6 +762,13 @@ toast.addEventListener('click', async (ev) => {
 // and only act on buttons that actually carry a record id.
 app.addEventListener('click', async (ev) => {
   if (form.contains(ev.target)) return;      // form handles its own controls
+  const opener = ev.target.closest('button[data-org-open]');
+  if (opener) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openOrganisationDetail(opener.dataset.orgOpen);
+    return;
+  }
   const b = ev.target.closest('button[data-id]');
   if (!b) return;
   const taskId = b.dataset.id;

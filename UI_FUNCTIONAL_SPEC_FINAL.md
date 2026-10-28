@@ -118,6 +118,17 @@ Each active item provides:
 
 Items can be expanded and collapsed through several nesting levels. All active tasks appear in the hierarchy, including tasks without dates. The hierarchy is the canonical structural view; date views are filtered views.
 
+Notes are not shown inline in the organisation hierarchy or date views. Clicking or tapping an object opens its detail window. The detail window is the place to inspect the object's notes and manage the object.
+
+### Item detail window
+
+* The window displays the object's title, type, status where supported, effective due date where applicable, waiting information where applicable, and the complete stored notes value.
+* The window provides the standard actions: Done where the object is completable, Edit, and Delete. Areas do not have Done; completion rules remain those in this specification.
+* Delete remains subject to confirmation and the child-item guard. An object with children cannot be deleted; the window must explain that its children must be moved or deleted first.
+* If the object has child items, the window shows a Children section containing one header for each direct child. Child headers show enough identity to distinguish the item and can be selected to open that child's detail window. Child notes are not displayed in the header list.
+* Clicking or tapping an action button must not also trigger the object-opening handler.
+* Closing the window returns the user to the same organisation/date-view context, including its expanded branches and scroll position.
+
 Completed and cancelled items are hidden from the default view but remain in the data store. An initial history toggle is not required.
 
 Each active Task and Project displays a completion control directly in its hierarchy row, without requiring the user to open the editor.

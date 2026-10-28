@@ -973,11 +973,14 @@ def _task_views_with_inherited_due(tasks, goals):
 
 
 def _organisation_tree(tasks, goals):
-    records = [r for r in goals + tasks
-               if r.get("kind") and r.get("status") not in ("done", "cancelled")]
+    all_records = [r for r in goals + tasks if r.get("kind")]
+    records = [r for r in all_records if r.get("status") not in ("done", "cancelled")]
     by_parent = {}
+    all_by_parent = {}
     for rec in records:
         by_parent.setdefault(rec.get("parent_id"), []).append(rec)
+    for rec in all_records:
+        all_by_parent.setdefault(rec.get("parent_id"), []).append(rec)
 
     def node(rec, inherited_project_due=None):
         own_due = rec.get("due")
@@ -986,6 +989,8 @@ def _organisation_tree(tasks, goals):
         due_source = "explicit" if own_due else ("inherited" if inherited_project_due else None)
         children = sorted(by_parent.get(rec.get("id"), []),
                           key=lambda x: (x.get("status") == "done", x.get("title", "").lower()))
+        child_headers = sorted(all_by_parent.get(rec.get("id"), []),
+                               key=lambda x: (x.get("status") in ("done", "cancelled"), x.get("title", "").lower()))
         return {
             "id": rec["id"],
             "title": rec.get("title", ""),
@@ -993,12 +998,18 @@ def _organisation_tree(tasks, goals):
             "parent_id": rec.get("parent_id"),
             "status": rec.get("status"),
             "priority": rec.get("priority"),
+            "notes": rec.get("notes"),
             "due": effective_due,
             "due_source": due_source,
             "target": rec.get("target"),
             "next_action": rec.get("next_action"),
             "waiting_on": rec.get("waiting_on"),
             "done_when": rec.get("done_when"),
+            "child_headers": [
+                {"id": child["id"], "title": child.get("title", ""),
+                 "kind": child.get("kind"), "status": child.get("status")}
+                for child in child_headers
+            ],
             "children": [node(child, project_due) for child in children],
         }
 
