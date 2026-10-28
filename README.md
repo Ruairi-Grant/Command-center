@@ -178,10 +178,4 @@ lib/cc_dashboard.py        localhost web dashboard
 tests/                     test suites
 data/                      your records (not in git)
 backups/                   snapshots (not in git)
-NEXT_STEPS.md              plan status and roadmap
 ```
-
-## Roadmap (deferred)
-
-Scheduled briefings, Obsidian integration, and a possible SQLite backend
-are considered but not built. See `NEXT_STEPS.md`.

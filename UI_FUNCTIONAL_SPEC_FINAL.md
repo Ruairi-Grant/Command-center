@@ -1,6 +1,6 @@
 # Command Centre UI — Expected Functionality
 
-Status: Final draft — awaiting approval
+Status: Live specification
 
 ## 1\. Purpose
 
@@ -94,6 +94,13 @@ A subtask is created through the Task type with a task or project as its parent.
 Dedicated Add area, Add project, and Add task shortcuts may be provided. They all focus the same form, preselect the type, and show the appropriate fields.
 
 Submitting creates exactly one item. New tasks default to Active. Success and failure are shown clearly.
+
+### Capture and classification
+
+* An Area is a stable domain of responsibility.
+* A Project is a bounded outcome that requires multiple actions or has a clear completion condition.
+* A Task is one concrete action; question-shaped work is represented as a Task phrased as a question.
+* Do not invent due dates, owners, priorities, dependencies, or completion criteria. When the user has not supplied an optional value, leave it unset.
 
 ## 6\. Organisation view
 
@@ -209,7 +216,7 @@ Sections:
 
 * Overdue — effective date before today.
 * Today — effective date equal to today.
-* Upcoming — effective date after today; initially, this can show all future-dated tasks.
+* Upcoming — effective date after today and within the next seven calendar days.
 * Active blockers/Waiting.
 
 The Overdue, Today, and Upcoming categories are mutually exclusive. A waiting task can appear in both Active blockers/Waiting and Overdue or Today, as appropriate. Waiting status does not suppress date-based views.
