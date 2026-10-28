@@ -208,6 +208,7 @@ def validate_task(rec, partial=False):
         out["title"] = _require_str(rec, "title")
     out["notes"] = _opt_str(rec, "notes")
     out["due"] = _opt_date(rec, "due")
+    out["follow_up_on"] = _opt_date(rec, "follow_up_on")
     out["status"] = _opt_choice(rec, "status", STATUSES)
     out["priority"] = _opt_choice(rec, "priority", PRIORITIES)
     out["kind"] = _opt_choice(rec, "kind", TASK_KINDS)
@@ -231,6 +232,7 @@ def validate_task(rec, partial=False):
     if not partial:
         out["notes"] = out.get("notes") or None
         out["due"] = out.get("due") or None
+        out["follow_up_on"] = out.get("follow_up_on") or None
         out["priority"] = out.get("priority") or "normal"
         out["status"] = out.get("status") or "active"
         out["kind"] = out.get("kind") or "task"
@@ -694,6 +696,8 @@ def create_task(actor, **fields):
     rec = validate_task(fields)
     if rec.get("status") == "waiting" and not (rec.get("waiting_on") or "").strip():
         raise CCError("waiting_on is required when status is waiting")
+    if rec.get("follow_up_on") and rec.get("status") != "waiting":
+        raise CCError("follow_up_on requires waiting status")
     _require_parent_exists(rec.get("parent_id"), home)
     rec["id"] = new_id()
     rec["status"] = rec.get("status") or "active"
@@ -701,6 +705,7 @@ def create_task(actor, **fields):
     rec["tags"] = rec.get("tags") or []
     rec["created"] = iso_now()
     rec["updated"] = rec["created"]
+    rec["waiting_since"] = rec["created"] if rec["status"] == "waiting" else None
     rec["completed_at"] = None
     with mutation(actor, "task.create", "task:" + rec["id"], home):
         records = load_kind("tasks", home)
@@ -726,13 +731,24 @@ def update_task(actor, rid, **patch):
         merged = dict(rec)
         merged.update(clean)
         old_status = rec.get("status") or "active"
-        if merged.get("status") == "waiting" and not (merged.get("waiting_on") or "").strip():
+        new_status = merged.get("status") or "active"
+        if new_status == "waiting" and not (merged.get("waiting_on") or "").strip():
             raise CCError("waiting_on is required when status is waiting")
-        if merged.get("status") in ("done", "cancelled") and _unfinished_children(rid, home):
+        if merged.get("follow_up_on") and new_status != "waiting":
+            raise CCError("follow_up_on requires waiting status")
+        if new_status in ("done", "cancelled") and _unfinished_children(rid, home):
             raise CCError("cannot complete or cancel an item with unfinished children")
         for k, v in clean.items():
             if k in patch:  # only overwrite fields explicitly provided
                 rec[k] = v
+        if old_status != "waiting" and new_status == "waiting":
+            rec["waiting_since"] = iso_now()
+        elif old_status == "waiting" and new_status == "active":
+            rec["waiting_on"] = None
+            rec["follow_up_on"] = None
+            rec["waiting_since"] = None
+        elif new_status == "waiting" and not rec.get("waiting_since"):
+            rec["waiting_since"] = iso_now()
         if clean.get("status") == "done" and old_status != "done":
             rec["previous_status"] = old_status
             rec["completed_at"] = iso_now()
@@ -920,7 +936,7 @@ def update_organisation(actor, rid, **patch):
     rec = _find(tasks, rid)
     if rec is not None:
         allowed = {k: v for k, v in patch.items()
-                   if k in ("title", "status", "kind", "parent_id", "waiting_on", "done_when", "next_action", "notes", "due", "priority")}
+                   if k in ("title", "status", "kind", "parent_id", "waiting_on", "follow_up_on", "done_when", "next_action", "notes", "due", "priority")}
         return update_task(actor, rid, **allowed)
     raise CCError("organisation item %s not found" % rid)
 
@@ -1004,6 +1020,8 @@ def _organisation_tree(tasks, goals):
             "target": rec.get("target"),
             "next_action": rec.get("next_action"),
             "waiting_on": rec.get("waiting_on"),
+            "follow_up_on": rec.get("follow_up_on"),
+            "waiting_since": rec.get("waiting_since"),
             "done_when": rec.get("done_when"),
             "child_headers": [
                 {"id": child["id"], "title": child.get("title", ""),
@@ -1035,10 +1053,16 @@ def build_state(home=None):
         return (t.get("due") or "9999-12-31", prio, t.get("title", ""))
 
     active = sorted(open_tasks(task_views), key=sortkey)
+    waiting = [t for t in active if t.get("status") == "waiting"]
+    waiting_followups = sorted(
+        [t for t in waiting if t.get("follow_up_on")],
+        key=lambda t: (t.get("follow_up_on"), t.get("title", "")),
+    )
     return {
         "generated_at": iso_now(),
         "today": day.isoformat(),
-        "waiting": [t for t in active if t.get("status") == "waiting"],
+        "waiting": waiting,
+        "waiting_followups": waiting_followups,
         "today_tasks": [t for t in active if t.get("due") == day.isoformat()],
         "overdue": [t for t in active if due_on_or_before(t, day) and t.get("due") < day.isoformat()],
         "upcoming_tasks": [t for t in active if t.get("due") and day.isoformat() < t["due"] <= soon],

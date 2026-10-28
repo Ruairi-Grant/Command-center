@@ -131,6 +131,53 @@ class LifecycleContractTests(IsolatedStoreTestCase):
         self.assertEqual(restored["status"], "waiting")
         self.assertIsNone(restored.get("completed_at"))
 
+    def test_LIFE_010_waiting_transition_preserves_task_and_records_metadata(self):
+        task = cc.create_organisation("test", title="Contact clinic", kind="task")
+        follow_up = (cc.today() + dt.timedelta(days=3)).isoformat()
+        with self.assertRaises(cc.CCError):
+            cc.update_organisation("test", task["id"], status="waiting")
+        waiting = cc.update_organisation(
+            "test", task["id"], status="waiting",
+            waiting_on="CPR clinic / appointment confirmation",
+            follow_up_on=follow_up,
+        )
+        self.assertEqual(waiting["id"], task["id"])
+        self.assertEqual(waiting["title"], "Contact clinic")
+        self.assertEqual(waiting["status"], "waiting")
+        self.assertEqual(waiting["follow_up_on"], follow_up)
+        self.assertTrue(waiting.get("waiting_since"))
+        self.assertEqual(len(cc.load_kind("tasks")), 1)
+
+    def test_LIFE_011_resume_clears_waiting_metadata_and_followup_views(self):
+        follow_up = (cc.today() - dt.timedelta(days=1)).isoformat()
+        task = cc.create_organisation(
+            "test", title="Await reply", kind="task", status="waiting",
+            waiting_on="External person", follow_up_on=follow_up,
+        )
+        state = cc.build_state()
+        self.assertIn(task["id"], [t["id"] for t in state["waiting"]])
+        self.assertIn(task["id"], [t["id"] for t in state["waiting_followups"]])
+        resumed = cc.update_organisation("test", task["id"], status="active")
+        self.assertEqual(resumed["status"], "active")
+        self.assertIsNone(resumed["waiting_on"])
+        self.assertIsNone(resumed["follow_up_on"])
+        self.assertIsNone(resumed["waiting_since"])
+        self.assertNotIn(task["id"], [t["id"] for t in cc.build_state()["waiting"]])
+
+    def test_DATE_011_followup_is_separate_from_due(self):
+        due = (cc.today() + dt.timedelta(days=5)).isoformat()
+        follow_up = (cc.today() + dt.timedelta(days=2)).isoformat()
+        task = cc.create_organisation(
+            "test", title="Separate dates", kind="task", status="waiting",
+            waiting_on="Reply", due=due, follow_up_on=follow_up,
+        )
+        state = cc.build_state()
+        waiting = next(item for item in state["waiting"] if item["id"] == task["id"])
+        followup = next(item for item in state["waiting_followups"] if item["id"] == task["id"])
+        self.assertEqual(waiting["due"], due)
+        self.assertEqual(waiting["follow_up_on"], follow_up)
+        self.assertEqual(followup["follow_up_on"], follow_up)
+
     def test_DATE_003_waiting_tasks_are_also_in_effective_date_view(self):
         due = (cc.today() - dt.timedelta(days=1)).isoformat()
         task = cc.create_organisation("test", title="Blocked", kind="task",

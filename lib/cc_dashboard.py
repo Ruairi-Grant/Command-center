@@ -277,6 +277,11 @@ PAGE = """<!doctype html>
       <input id="nt-due" name="due" type="date">
       <button id="nt-clear-due" type="button" class="clear-date">Clear</button>
     </div>
+    <div class="field" style="flex:1 1 140px" id="nt-follow-up-wrap" hidden>
+      <label for="nt-follow-up">Follow up</label>
+      <input id="nt-follow-up" name="follow_up_on" type="date">
+      <button id="nt-clear-follow-up" type="button" class="clear-date">Clear</button>
+    </div>
     <div class="field" style="flex:0 0 140px" id="nt-status-wrap">
       <label for="nt-status">Status</label>
       <select id="nt-status" name="status"></select>
@@ -327,6 +332,9 @@ const ntKindStatus = document.getElementById('nt-status');
 const ntDue = document.getElementById('nt-due');
 const ntClearDue = document.getElementById('nt-clear-due');
 const ntDueWrap = document.getElementById('nt-due-wrap');
+const ntFollowUp = document.getElementById('nt-follow-up');
+const ntClearFollowUp = document.getElementById('nt-clear-follow-up');
+const ntFollowUpWrap = document.getElementById('nt-follow-up-wrap');
 const ntStatusWrap = document.getElementById('nt-status-wrap');
 const ntWaitingWrap = document.getElementById('nt-waiting-wrap');
 const ntWaiting = document.getElementById('nt-waiting');
@@ -374,6 +382,38 @@ function taskLi(t, today) {
     + '</li>';
 }
 
+function followUpLabel(t, today) {
+  if (!t.follow_up_on) return 'No follow-up date';
+  if (t.follow_up_on < today) return 'Follow-up overdue: ' + esc(t.follow_up_on);
+  if (t.follow_up_on === today) return 'Follow-up today';
+  return 'Follow-up: ' + esc(t.follow_up_on);
+}
+
+function waitingTaskLi(t, today) {
+  const waitingSince = t.waiting_since ? 'Waiting since: ' + esc(t.waiting_since) : 'Waiting since: ' + esc(t.created || 'unknown');
+  return '<li>'
+    + '<button class="task-open" type="button" data-org-open="' + esc(t.id) + '">' + esc(t.title) + '</button>'
+    + '<span class="waiting-on">Waiting on: ' + esc(t.waiting_on || 'external dependency') + '</span>'
+    + '<span class="waiting-since">' + waitingSince + '</span>'
+    + '<span class="follow-up">' + followUpLabel(t, today) + '</span>'
+    + '<button data-id="' + esc(t.id) + '" data-previous-status="waiting">Done</button>'
+    + '</li>';
+}
+
+function waitingSection(waiting, followups, today) {
+  const scheduled = new Set(followups.map(item => item.id));
+  const unscheduled = waiting.filter(item => !scheduled.has(item.id));
+  let html = '<h2>Waiting <span class="count">(' + waiting.length + ')</span></h2><div class="card">';
+  if (followups.length) {
+    html += '<h3>Follow-ups</h3><ul>' + followups.map(i => waitingTaskLi(i, today)).join('') + '</ul>';
+  }
+  if (unscheduled.length) {
+    html += '<h3>No follow-up date</h3><ul>' + unscheduled.map(i => waitingTaskLi(i, today)).join('') + '</ul>';
+  }
+  if (!waiting.length) html += '<div class="empty">Nothing here.</div>';
+  return html + '</div>';
+}
+
 function section(title, items, render, today) {
   let html = '<h2>' + esc(title) + ' <span class="count">(' + items.length + ')</span></h2>';
   html += '<div class="card">';
@@ -387,15 +427,19 @@ function syncNewItemFields() {
   const kind = ntKind.value;
   const isTask = kind === 'task';
   const isArea = kind === 'area';
+  const isWaiting = isTask && ntKindStatus.value === 'waiting';
   ntDueWrap.hidden = isArea;
   ntStatusWrap.hidden = isArea;
-  ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
+  ntWaitingWrap.hidden = !isWaiting;
+  ntFollowUpWrap.hidden = !isWaiting;
   ntKindStatus.innerHTML = (isTask
     ? ['active', 'waiting', 'done', 'cancelled']
     : ['active', 'done', 'cancelled'])
     .map(v => '<option value="' + v + '">' + v + '</option>').join('');
   if (!ntKindStatus.value) ntKindStatus.value = 'active';
-  ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
+  const waiting = isTask && ntKindStatus.value === 'waiting';
+  ntWaitingWrap.hidden = !waiting;
+  ntFollowUpWrap.hidden = !waiting;
 }
 
 function resetUnifiedForm() {
@@ -409,7 +453,7 @@ function resetUnifiedForm() {
   ntParent.innerHTML = buildParentOptions(currentOrganisation, 'task', '');
 }
 
-function startUnifiedEdit(node) {
+function startUnifiedEdit(node, desiredStatus) {
   if (!node) return;
   ntId.value = node.id;
   ntKind.value = node.kind;
@@ -418,11 +462,12 @@ function startUnifiedEdit(node) {
     ? ['active', 'done', 'cancelled']
     : ['active', 'waiting', 'done', 'cancelled'])
     .map(v => '<option value="' + v + '">' + v + '</option>').join('');
-  ntKindStatus.value = node.status || 'active';
+  ntKindStatus.value = desiredStatus || node.status || 'active';
   syncNewItemFields();
   document.getElementById('nt-title').value = node.title || '';
   ntDue.value = node.due_source === 'explicit' ? (node.due || '') : '';
   ntWaiting.value = node.waiting_on || '';
+  ntFollowUp.value = node.follow_up_on || '';
   document.getElementById('nt-notes').value = node.notes || '';
   ntParent.innerHTML = buildParentOptions(currentOrganisation, node.kind, node.id);
   ntParent.value = node.parent_id || '';
@@ -435,7 +480,11 @@ function startUnifiedEdit(node) {
 function orgControls(n) {
   const done = n.kind !== 'area' && n.status !== 'done' && n.status !== 'cancelled'
     ? '<button class="org-action" type="button" data-org-complete="' + esc(n.id) + '" data-org-kind="' + esc(n.kind) + '">Done</button>' : '';
-  return done + '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
+  const wait = n.kind === 'task' && n.status === 'active'
+    ? '<button class="org-action" type="button" data-org-wait="' + esc(n.id) + '">Mark waiting</button>' : '';
+  const resume = n.kind === 'task' && n.status === 'waiting'
+    ? '<button class="org-action" type="button" data-org-resume="' + esc(n.id) + '">Resume</button>' : '';
+  return done + wait + resume + '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
     + '<button class="org-action danger" type="button" data-org-delete="' + esc(n.id) + '">Delete</button>';
 }
 
@@ -447,7 +496,9 @@ function openOrganisationDetail(id) {
   const status = node.kind === 'area' ? '' : ' · ' + (node.status || '');
   const due = node.due ? ' · Due ' + node.due + (node.due_source === 'inherited' ? ' (inherited)' : '') : '';
   const waiting = node.waiting_on ? ' · Waiting on ' + node.waiting_on : '';
-  orgDetailMeta.textContent = node.kind + status + due + waiting;
+  const waitingSince = node.waiting_since ? ' · Waiting since ' + node.waiting_since : '';
+  const followUp = node.follow_up_on ? ' · Follow up ' + node.follow_up_on : '';
+  orgDetailMeta.textContent = node.kind + status + due + waiting + waitingSince + followUp;
   orgDetailNotes.innerHTML = node.notes ? esc(node.notes) : '<span class="empty">No notes.</span>';
   const children = node.child_headers || node.children || [];
   orgDetailChildren.innerHTML = children.length
@@ -529,18 +580,52 @@ ntClearDue.addEventListener('click', () => {
   ntDue.value = '';
   ntDue.focus();
 });
+ntClearFollowUp.addEventListener('click', () => {
+  ntFollowUp.value = '';
+  ntFollowUp.focus();
+});
 ntCancel.addEventListener('click', resetUnifiedForm);
 orgAdd.addEventListener('click', () => {
   resetUnifiedForm();
   form.scrollIntoView({behavior: 'smooth', block: 'start'});
   document.getElementById('nt-title').focus();
 });
+async function resumeOrganisationItem(id, button) {
+  if (button) button.disabled = true;
+  try {
+    const r = await fetch('/api/organisation/update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({id: id, status: 'active'}),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    closeOrganisationDetail();
+    say('Resumed');
+    load();
+  } catch (e) {
+    if (button) button.disabled = false;
+    say('Resume failed: ' + e.message, true);
+  }
+}
+
 orgTree.addEventListener('click', async (ev) => {
   const opener = ev.target.closest('button[data-org-open]');
   if (opener) {
     ev.preventDefault();
     ev.stopPropagation();
     openOrganisationDetail(opener.dataset.orgOpen);
+    return;
+  }
+  const wait = ev.target.closest('button[data-org-wait]');
+  if (wait) {
+    ev.stopPropagation();
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, wait.dataset.orgWait), 'waiting');
+    return;
+  }
+  const resume = ev.target.closest('button[data-org-resume]');
+  if (resume) {
+    ev.stopPropagation();
+    await resumeOrganisationItem(resume.dataset.orgResume, resume);
     return;
   }
   const complete = ev.target.closest('button[data-org-complete]');
@@ -588,6 +673,17 @@ orgDetail.addEventListener('click', async (ev) => {
   const child = ev.target.closest('button[data-org-detail-child]');
   if (child) {
     openOrganisationDetail(child.dataset.orgDetailChild);
+    return;
+  }
+  const wait = ev.target.closest('button[data-org-wait]');
+  if (wait) {
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, wait.dataset.orgWait), 'waiting');
+    closeOrganisationDetail();
+    return;
+  }
+  const resume = ev.target.closest('button[data-org-resume]');
+  if (resume) {
+    await resumeOrganisationItem(resume.dataset.orgResume, resume);
     return;
   }
   const complete = ev.target.closest('button[data-org-complete]');
@@ -654,7 +750,7 @@ async function load() {
   window.scrollTo(0, scrollY);
   updateStore();
   let html = '';
-  html += section('Waiting', s.waiting || [], taskLi, s.today);
+  html += waitingSection(s.waiting || [], s.waiting_followups || [], s.today);
   html += section('Overdue', s.overdue, taskLi, s.today);
   html += section('Due today', s.today_tasks, taskLi, s.today);
   html += section('Upcoming (7 days)', s.upcoming_tasks, taskLi, s.today);
@@ -712,7 +808,10 @@ form.addEventListener('submit', async (ev) => {
     payload.due = document.getElementById('nt-due').value || null;
     payload.status = ntKindStatus.value;
   }
-  if (kind === 'task') payload.waiting_on = ntWaiting.value.trim() || null;
+  if (kind === 'task') {
+    payload.waiting_on = ntWaiting.value.trim() || null;
+    if (payload.status === 'waiting') payload.follow_up_on = ntFollowUp.value || null;
+  }
   if (kind === 'task' && payload.status === 'waiting' && !payload.waiting_on) {
     say('Waiting on is required for waiting tasks', true); return;
   }
@@ -921,7 +1020,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/api/organisation/create":
                     fields = {k: body[k] for k in (
                         "title", "kind", "parent_id", "status", "priority",
-                        "next_action", "done_when", "waiting_on", "notes", "due", "target"
+                        "next_action", "done_when", "waiting_on", "follow_up_on", "notes", "due", "target"
                     ) if k in body}
                     rec = cc.create_organisation("dashboard", **fields)
                     self._send_json({"ok": True, "record": rec}, 201)
@@ -933,7 +1032,7 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     fields = {k: body[k] for k in (
                         "title", "kind", "parent_id", "status", "priority",
-                        "next_action", "done_when", "waiting_on", "notes", "due", "target"
+                        "next_action", "done_when", "waiting_on", "follow_up_on", "notes", "due", "target"
                     ) if k in body}
                     rec = cc.update_organisation("dashboard", rid, **fields)
                     self._send_json({"ok": True, "record": rec})

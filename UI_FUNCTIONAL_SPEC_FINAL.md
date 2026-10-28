@@ -152,6 +152,7 @@ The editor supports:
 * Setting, changing, or clearing a project due date.
 * Setting, changing, or clearing a task due date.
 * Changing status.
+* When status is Waiting, setting or clearing the Waiting-on value and the Follow-up date.
 * Changing parent.
 * Saving or cancelling.
 
@@ -210,31 +211,38 @@ Statuses:
 
 New tasks default to Active.
 
-A blocker is a Task with Waiting status. It supports:
+A blocker is a Task with Waiting status. Waiting is a lifecycle state of the existing task, not a second task or separate waiting object.
 
-* A title describing what is blocked or what response is expected.
-* A Waiting-on field identifying the person, system, or event.
-* The Waiting-on field is visible when status is Waiting and is required in that state.
-* An optional due date for when the response/action is expected.
-* Its original creation date, shown so its age is clear.
-* A way to return it to Active when the dependency clears.
+* The task title describes the outcome or work being pursued, not merely the fact that it is waiting.
+* Waiting-on identifies the external person, organisation, system, appointment, or event that must respond or occur before the task can progress.
+* The Waiting-on field is visible when status is Waiting and is required to be a non-empty value in that state.
+* Follow-up date is an optional `follow_up_on` value that means “review this waiting item if no response has arrived by this date.” It is separate from the task's `due` date.
+* `due` remains the deadline for the task outcome. `follow_up_on` is the date for checking the external dependency; neither field is silently copied into the other.
+* Waiting items show their original creation date and a Waiting-since timestamp. Waiting-since is set when the task enters Waiting and remains stable while it stays Waiting.
+* A task can enter Waiting from Active through the detail window or editor without changing its identity, title, parent, or history. The transition requires Waiting-on and may set Follow-up date.
+* If no response has arrived by the Follow-up date, the task remains Waiting; it is surfaced as a follow-up due or overdue and is never changed automatically.
+* When the dependency clears, Resume changes the task to Active and clears Waiting-on, Follow-up date, and Waiting-since. The transition remains in the activity history.
+* A task is Active until the user has taken the relevant action and is genuinely waiting on an external dependency. For example, “Get CPR appointment booked” is Active until an appointment request has been submitted; it then becomes Waiting on “CPR clinic / appointment confirmation.”
+* A task may be marked Done when the waiting outcome has been achieved. It may be Cancelled under the normal lifecycle rules.
+* Multiple independent dependencies should be represented by separate tasks or notes rather than turning Waiting-on into a second task list.
 
 ## 10\. Date and task views
 
-Date views show active tasks using their effective due dates and the user’s local calendar date.
+Date views show active tasks using their effective due dates and the user’s local calendar date. Waiting follow-ups use a separate view within the Waiting section.
 
 Sections:
 
-* Overdue — effective date before today.
-* Today — effective date equal to today.
-* Upcoming — effective date after today and within the next seven calendar days.
-* Active blockers/Waiting.
+* Overdue — active task effective date before today.
+* Today — active task effective date equal to today.
+* Upcoming — active task effective date after today and within the next seven calendar days.
+* Waiting — all Waiting tasks, including their Waiting-on value, age, and Waiting-since timestamp.
+* Waiting follow-ups — the Waiting subsection sorted by `follow_up_on`, showing due today, overdue, upcoming, and unscheduled follow-ups.
 
-The Overdue, Today, and Upcoming categories are mutually exclusive. A waiting task can appear in both Active blockers/Waiting and Overdue or Today, as appropriate. Waiting status does not suppress date-based views.
+The Overdue, Today, and Upcoming categories are mutually exclusive. A Waiting task may also appear in the ordinary date views when it has a genuine task `due` date; `follow_up_on` is never used to populate those ordinary date views. Waiting status does not suppress a genuine task deadline.
 
 The organisation hierarchy contains all active tasks, including undated tasks. There is no separate No date organisation section.
 
-Each date-view item shows its title, effective due date, inherited-date indication where relevant, status, and completion control. Active blockers also show their original creation date.
+Each date-view item shows its title, effective due date, inherited-date indication where relevant, status, and completion control. Waiting items show Waiting-on, original creation date, Waiting-since, and Follow-up date where set. Follow-up due/overdue labels refer to `follow_up_on`, not `due`.
 
 Completed and cancelled items do not appear in active date views.
 

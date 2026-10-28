@@ -181,6 +181,7 @@ def build_env(html):
            El(id_="nt-kind", in_form=True),
            El(id_="nt-title", in_form=True),
            El(id_="nt-due", in_form=True),
+           El(id_="nt-follow-up", in_form=True),
            El(id_="nt-status", in_form=True),
            El(id_="nt-parent", in_form=True),
            El(id_="nt-waiting", in_form=True),
@@ -205,6 +206,7 @@ def build_env(html):
             "kind": doc.getElementById("nt-kind").value,
             "title": doc.getElementById("nt-title").value.strip(),
             "due": doc.getElementById("nt-due").value or None,
+            "follow_up_on": doc.getElementById("nt-follow-up").value or None,
             "status": doc.getElementById("nt-status").value,
             "parent_id": doc.getElementById("nt-parent").value or None,
             "waiting_on": doc.getElementById("nt-waiting").value.strip() or None,
@@ -309,6 +311,20 @@ def main():
 
         check("empty due/notes omitted from payload", c3b)
 
+        def c3c():
+            reqs, doc, form, app, done, s, c = build_env(html)
+            doc.getElementById("nt-title").value = "waiting task"
+            doc.getElementById("nt-status").value = "waiting"
+            doc.getElementById("nt-waiting").value = "CPR clinic"
+            doc.getElementById("nt-follow-up").value = "2026-11-15"
+            form.submit()
+            b = json.loads(reqs[0]["body"])
+            return (b.get("status") == "waiting"
+                    and b.get("waiting_on") == "CPR clinic"
+                    and b.get("follow_up_on") == "2026-11-15")
+
+        check("waiting form sends dependency and follow-up date", c3c)
+
         def c4():
             reqs, doc, form, app, done, s, c = build_env(html)
             app._dispatch_with_target("click", done)   # bubbles to #app
@@ -360,6 +376,17 @@ def main():
                     and "'/api/organisation/update'" in html)
 
         check("header exposes UI version and local refresh time; top form supports all item types", c9)
+
+        def c9b():
+            return ("id=\"nt-follow-up\"" in html
+                    and "follow_up_on" in html
+                    and "ntFollowUpWrap.hidden" in html
+                    and "data-org-wait" in html
+                    and "data-org-resume" in html
+                    and "waitingSection" in html
+                    and "waitingTaskLi" in html)
+
+        check("waiting workflow exposes conditional follow-up and resume controls", c9b)
 
         def c10():
             return ("window.scrollY" in html

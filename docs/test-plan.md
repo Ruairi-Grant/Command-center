@@ -58,6 +58,9 @@ Implementation meanings:
 | LIFE-006 | Completion requires no confirmation and offers temporary Undo. | Completion is direct; Undo restores prior status and clears completion timestamp; no accidental completion from unrelated controls. | API/UI | Covered | Implemented | High |
 | LIFE-007 | Completed/cancelled items leave active views but remain stored. | Complete task/project; verify state omission and raw persistence; no history toggle required initially. | Unit/API/UI | Covered | Implemented | High |
 | LIFE-008 | Lifecycle changes preserve completion metadata. | Completion timestamp set; repeated completion; undo; restart persistence. | Unit/API | Partial | Partial | High |
+| LIFE-009 | Waiting is a state of the existing task, not a second item. | Active-to-Waiting retains ID/title/parent/history; no duplicate waiting record; Waiting-to-Active retains identity. | Unit/API/UI | Missing | Partial | High |
+| LIFE-010 | Entering Waiting requires an external dependency and records waiting metadata. | Non-empty Waiting-on required; Waiting-since set once; optional Follow-up date accepted; invalid blank values rejected. | Unit/API/UI | Missing | Partial | High |
+| LIFE-011 | Resuming a Waiting task clears waiting metadata without deleting history. | Resume returns Active; Waiting-on, Follow-up date, and Waiting-since clear; activity entry remains; no automatic resume at follow-up date. | Unit/API/UI | Missing | Missing | High |
 
 ### Dates and blockers
 
@@ -71,8 +74,10 @@ Implementation meanings:
 | DATE-006 | Date categories use the user’s local calendar date. | Before today = Overdue; equal = Today; after = Upcoming; timezone boundary. | Unit/API | Missing | Partial | High |
 | DATE-007 | Overdue, Today, Upcoming are mutually exclusive. | A task appears in exactly one date category; undated task appears in none. | Unit/API | Missing | Partial | High |
 | DATE-008 | Waiting task may appear in Waiting and Overdue/Today. | Waiting overdue; waiting due today; waiting future; waiting without date. | Unit/API/UI | Missing | Partial | High |
-| DATE-009 | Upcoming initially includes all future-dated tasks. | Date eight days out; future task appears; no artificial seven-day cutoff. | Unit/API | Missing | Partial | Medium |
+| DATE-009 | Upcoming includes future-dated tasks within the next seven calendar days. | Date eight days out; date seven days out; future task appears only within the defined seven-day window. | Unit/API | Missing | Partial | Medium |
 | DATE-010 | Blockers show original creation date. | Creation date persists across edits, refresh, restart; UI displays it. | Unit/API/UI | Missing | Partial | Medium |
+| DATE-011 | Waiting follow-up is separate from task due date. | Set both fields; changing one does not change the other; ordinary date views use due and Waiting follow-up uses follow_up_on. | Unit/API/UI | Missing | Missing | High |
+| DATE-012 | Waiting follow-up status is surfaced without automatic lifecycle changes. | No follow-up date; follow-up today; overdue follow-up; future follow-up; task remains Waiting until user resumes or completes it. | Unit/API/UI | Missing | Missing | High |
 
 ### Creation and editing UI
 
@@ -92,6 +97,8 @@ Implementation meanings:
 | UI-012 | UI version is visible in the header. | Served page contains a version marker; version changes with the deployed UI; header identifies the active build. | UI | Missing | Missing | High |
 | UI-013 | Background refresh preserves page layout state. | Scroll position, open/collapsed organisation branches, and unsaved form input remain unchanged after a successful refresh. | UI | Missing | Partial | High |
 | UI-014 | Due dates can be cleared in the unified form. | Select a date, activate Clear, verify the input is empty and create/update sends a null due date. | UI/API | Missing | Partial | Medium |
+| UI-015 | Waiting workflow is compact and conditional. | Mark Active task Waiting; Waiting-on and Follow-up fields appear; Resume clears them; non-Waiting forms do not show waiting-only controls. | UI/API | Missing | Missing | High |
+| UI-016 | Waiting follow-ups are visible without duplicating tasks. | Waiting section shows dependency, age, Waiting-since, and Follow-up state; clicking the item opens its detail window; no second waiting item is created. | UI/API | Missing | Missing | High |
 
 ### Store isolation and request consistency
 
@@ -113,6 +120,7 @@ Implementation meanings:
 | PERSIST-004 | Background refresh does not overwrite unsaved form input. | Type/title/notes/due entered before refresh; values remain; refreshed list updates separately. | UI | Missing | Missing | High |
 | PERSIST-005 | Browser reload preserves unfinished drafts where practical. | Draft survives reload; PROD and DEV drafts are isolated; submitted draft clears. | UI | Missing | Missing | Medium |
 | PERSIST-006 | Existing atomic writes, recovery, backups, and data integrity remain intact. | Preserve current concurrency, atomicity, backup retention, restore, and activity tests. | Unit/integration | Covered | Implemented | Critical |
+| PERSIST-007 | Waiting metadata persists and remains consistent across refresh/restart. | Waiting-on, follow_up_on, waiting_since, and status survive reload; resume clears the fields atomically; failed transitions leave the task unchanged. | Integration/API | Missing | Missing | High |
 
 ### Accessibility and responsive behavior
 

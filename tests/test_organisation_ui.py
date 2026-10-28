@@ -91,6 +91,28 @@ def main():
         with urllib.request.urlopen(BASE + "/api/state", timeout=10) as response:
             state = json.loads(response.read().decode())
         assert find_node(state["organisation"], task_id)["notes"] == "Updated task note"
+        status, waiting_result = post_json(BASE + "/api/organisation/create", {
+            "kind": "task", "title": "Waiting task", "parent_id": project_id,
+            "status": "waiting", "waiting_on": "CPR clinic",
+            "follow_up_on": "2099-01-02"
+        })
+        assert status == 201
+        waiting_id = waiting_result["record"]["id"]
+        assert waiting_result["record"]["waiting_since"]
+        with urllib.request.urlopen(BASE + "/api/state", timeout=10) as response:
+            state = json.loads(response.read().decode())
+        waiting_node = find_node(state["organisation"], waiting_id)
+        assert waiting_node["follow_up_on"] == "2099-01-02"
+        assert waiting_node["waiting_on"] == "CPR clinic"
+        assert waiting_id in [item["id"] for item in state["waiting_followups"]]
+        status, resumed = post_json(BASE + "/api/organisation/update", {
+            "id": waiting_id, "status": "active"
+        })
+        assert status == 200
+        assert resumed["record"]["waiting_on"] is None
+        assert resumed["record"]["follow_up_on"] is None
+        assert resumed["record"]["waiting_since"] is None
+
         status, done_child_result = post_json(BASE + "/api/organisation/create", {
             "kind": "task", "title": "Completed child", "parent_id": project_id,
             "notes": "Completed note"
@@ -129,6 +151,14 @@ def main():
         assert "orgEditor" not in html
         assert "id=\"org-due\"" not in html
         assert "const isSubtask" in html
+        assert 'id="nt-follow-up"' in html
+        assert "data-org-wait" in html
+        assert "data-org-resume" in html
+        assert "waiting_followups" in html
+        assert "follow_up_on" in html
+        assert "Waiting since" in html
+        assert "Mark waiting" in html
+        assert "Resume" in html
         assert 'id="org-detail"' in html
         assert 'id="org-detail-notes"' in html
         assert 'data-org-open' in html
