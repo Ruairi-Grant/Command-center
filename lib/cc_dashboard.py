@@ -427,19 +427,18 @@ function syncNewItemFields() {
   const kind = ntKind.value;
   const isTask = kind === 'task';
   const isArea = kind === 'area';
-  const isWaiting = isTask && ntKindStatus.value === 'waiting';
+  const selectedStatus = ntKindStatus.value;
+  const statusOptions = isTask
+    ? ['active', 'waiting', 'done', 'cancelled']
+    : ['active', 'done', 'cancelled'];
   ntDueWrap.hidden = isArea;
   ntStatusWrap.hidden = isArea;
+  ntKindStatus.innerHTML = statusOptions
+    .map(v => '<option value="' + v + '">' + v + '</option>').join('');
+  ntKindStatus.value = statusOptions.includes(selectedStatus) ? selectedStatus : 'active';
+  const isWaiting = isTask && ntKindStatus.value === 'waiting';
   ntWaitingWrap.hidden = !isWaiting;
   ntFollowUpWrap.hidden = !isWaiting;
-  ntKindStatus.innerHTML = (isTask
-    ? ['active', 'waiting', 'done', 'cancelled']
-    : ['active', 'done', 'cancelled'])
-    .map(v => '<option value="' + v + '">' + v + '</option>').join('');
-  if (!ntKindStatus.value) ntKindStatus.value = 'active';
-  const waiting = isTask && ntKindStatus.value === 'waiting';
-  ntWaitingWrap.hidden = !waiting;
-  ntFollowUpWrap.hidden = !waiting;
 }
 
 function resetUnifiedForm() {

@@ -74,6 +74,21 @@ def handler_source(html, listener_marker):
     raise ValueError("could not balance braces for %s" % listener_marker)
 
 
+def function_source(html, function_name):
+    marker = "function " + function_name + "("
+    i = html.index(marker)
+    brace = html.index("{", i)
+    depth = 0
+    for k in range(brace, len(html)):
+        if html[k] == "{":
+            depth += 1
+        elif html[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return html[i:k + 1]
+    raise ValueError("could not balance function %s" % function_name)
+
+
 # --------------------------------------------------------------------------
 # A tiny DOM + fetch shim
 # --------------------------------------------------------------------------
@@ -387,6 +402,43 @@ def main():
                     and "waitingTaskLi" in html)
 
         check("waiting workflow exposes conditional follow-up and resume controls", c9b)
+
+        def c9c():
+            sync_src = function_source(html, "syncNewItemFields")
+            script = r'''
+class Select {
+  constructor() { this._value = ''; this._options = []; }
+  get value() { return this._value; }
+  set value(v) { this._value = String(v); }
+  set innerHTML(v) {
+    this._options = [...v.matchAll(/value="([^"]+)"/g)].map(m => m[1]);
+    this._value = this._options[0] || '';
+  }
+}
+const ntKind = {value: 'task'};
+const ntKindStatus = new Select();
+const ntDueWrap = {hidden: false};
+const ntFollowUpWrap = {hidden: false};
+const ntStatusWrap = {hidden: false};
+const ntWaitingWrap = {hidden: false};
+''' + sync_src + r'''
+for (const [kind, statuses] of Object.entries({
+  task: ['active', 'waiting', 'done', 'cancelled'],
+  project: ['active', 'done', 'cancelled'],
+})) {
+  ntKind.value = kind;
+  for (const status of statuses) {
+    ntKindStatus.value = status;
+    syncNewItemFields();
+    if (ntKindStatus.value !== status) throw new Error(kind + ':' + status + ' was reset');
+  }
+}
+console.log('status options preserved');
+'''
+            result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+            return result.returncode == 0 and "status options preserved" in result.stdout
+
+        check("edit status dropdown preserves every valid option", c9c)
 
         def c10():
             return ("window.scrollY" in html
