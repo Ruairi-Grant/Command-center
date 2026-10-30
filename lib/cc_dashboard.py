@@ -39,6 +39,8 @@ import cc_store as cc  # noqa: E402
 UI_VERSION = "0.4.0"
 
 CONFIG = cc_config.load()
+assert CONFIG.data_home is not None
+assert CONFIG.backup_home is not None
 os.environ["CC_DATA_DIR"] = CONFIG.data_home
 os.environ["CC_BACKUP_DIR"] = CONFIG.backup_home
 STORE = cc.Store.from_config(CONFIG)

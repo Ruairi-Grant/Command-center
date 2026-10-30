@@ -12,7 +12,8 @@ set "PROJECT_DIR=%~dp0"
 
 REM The scheduled task always boots on PROD. The runtime UI switch is
 REM temporary and is not persisted.
-set "PYEXE=C:\Users\ruair\AppData\Local\hermes\tools\python-3.14.7+202****0901-win32-x64\python.exe"
+set "PYEXE="
+for /d %%D in ("%LOCALAPPDATA%\hermes\tools\python-*") do if exist "%%~fD\python.exe" set "PYEXE=%%~fD\python.exe"
 set "LOG_DIR=%PROJECT_DIR%logs"
 set "LOG_FILE=%LOG_DIR%\dashboard.log"
 set "LOG_MAX=5242880"
