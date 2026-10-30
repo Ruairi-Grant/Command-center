@@ -1,0 +1,162 @@
+name: Container
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/ruairi-grant/command-centre
+
+jobs:
+  compose-validation:
+    name: Compose configuration validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate development Compose file
+        run: docker compose -f compose.yaml config --quiet
+      - name: Validate production example with synthetic placeholders
+        env:
+          CC_IMAGE: ghcr.io/ruairi-grant/command-centre@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          CC_ALLOWED_HOSTS: proxy.example.invalid
+          CC_EXPECTED_TS_LOGIN: synthetic@example.invalid
+          CC_HOST_DATA_DIR: /tmp/command-centre-data
+          CC_HOST_BACKUP_DIR: /tmp/command-centre-backups
+        run: docker compose -f compose.production.example.yaml config --quiet
+
+  container-validation:
+    name: Container validation (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build test image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: command-centre:test-${{ matrix.arch }}
+          build-args: |
+            APP_VERSION=ci-${{ github.sha }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.run_id }}
+          cache-from: type=gha,scope=container-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=container-${{ matrix.arch }}
+      - name: Verify image architecture
+        run: test "$(docker image inspect --format '{{.Architecture}}' command-centre:test-${{ matrix.arch }})" = "${{ matrix.arch }}"
+      - name: Install test dependencies
+        uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - name: Run container integration tests
+        env:
+          CC_RUN_CONTAINER_TESTS: "1"
+          CC_CONTAINER_IMAGE: command-centre:test-${{ matrix.arch }}
+          CC_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          uv sync --locked --group dev
+          uv run pytest tests/test_container.py -q
+      - name: Scan test image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: command-centre:test-${{ matrix.arch }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          scanners: vuln
+
+  publish:
+    name: Publish multi-platform image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [compose-validation, container-validation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.version=sha-${{ github.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            APP_VERSION=sha-${{ github.sha }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ github.run_id }}
+          cache-from: type=gha,scope=container-release
+          cache-to: type=gha,mode=max,scope=container-release
+          provenance: mode=max
+          sbom: true
+      - name: Scan published image by digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          scanners: vuln
+      - name: Verify manifest and write release summary
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE_NAME}@${IMAGE_DIGEST}"
+          {
+            echo "## Command Centre container release"
+            echo
+            echo "- Source commit: \\`${GITHUB_SHA}\\`"
+            echo "- Image: \\`${IMAGE_NAME}@${IMAGE_DIGEST}\\`"
+            echo "- Tag: \\`${IMAGE_NAME}:sha-${GITHUB_SHA}\\`"
+            echo "- Platforms: linux/amd64, linux/arm64"
+            echo "- SBOM: BuildKit attestation enabled"
+            echo "- Provenance: BuildKit max-mode attestation enabled"
+            echo "- Vulnerability gate: HIGH/CRITICAL fixable findings fail the job"
+          } >> "$GITHUB_STEP_SUMMARY"

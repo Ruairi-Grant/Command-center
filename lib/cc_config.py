@@ -71,8 +71,10 @@ def load() -> AppConfig:
         raise ConfigError("CC_ENV must be development, test, or production")
 
     bind_host = _env("CC_BIND_HOST", "127.0.0.1") or "127.0.0.1"
+    containerized = _bool("CC_CONTAINER", False)
     if environment == "production" and bind_host not in {"127.0.0.1", "::1"}:
-        raise ConfigError("production bind host must be loopback")
+        if not (containerized and bind_host == "0.0.0.0"):
+            raise ConfigError("production bind host must be loopback unless CC_CONTAINER=true")
 
     configured_hosts = tuple(
         item.strip().lower()
@@ -103,6 +105,13 @@ def load() -> AppConfig:
         backup_home = os.path.join(
             os.path.expanduser("~"), ".local", "share", "command-centre", "dev", "backups"
         )
+
+    if environment == "production":
+        for label, path in (("CC_DATA_DIR", data_home), ("CC_BACKUP_DIR", backup_home)):
+            if not os.path.isdir(path):
+                raise ConfigError(f"{label} must be an existing directory in production")
+            if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
+                raise ConfigError(f"{label} must be readable and writable in production")
 
     return AppConfig(
         environment=environment,

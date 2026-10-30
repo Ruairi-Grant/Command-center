@@ -22,4 +22,12 @@ command-center-dev/
 .env.*
 !.env.example
 
-# Documentation and source remain in the image context.
+# The Dockerfile copies only the application runtime source.
+tests/
+docs/
+README.md
+DEVELOPMENT.md
+Dockerfile
+compose.yaml
+compose.production.example.yaml
+.github/

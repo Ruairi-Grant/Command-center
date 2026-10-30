@@ -167,3 +167,45 @@ tests/                     test suites
 data/                      your records (not in git)
 backups/                   snapshots (not in git)
 ```
+
+## Container workflow
+
+The application image contains only the standard-library runtime and source
+under `lib/`. It runs as UID/GID `10001`, is read-only except for explicitly
+mounted data and backup directories, and listens on `0.0.0.0` inside the
+container. Compose publishes it only on the host loopback interface.
+
+The development Compose file uses synthetic named volumes:
+
+```bash
+docker compose up --build
+curl http://127.0.0.1:8787/health/ready
+docker compose logs -f command-centre
+docker compose down
+```
+
+The production example is `compose.production.example.yaml`. It requires
+pre-created external data and backup directories, exact reverse-proxy host and
+identity settings, and an immutable image reference such as
+`ghcr.io/ruairi-grant/command-centre@sha256:<digest>`. Missing production
+mounts fail closed; the image never creates a production store inside its
+filesystem.
+
+Pull requests build and test AMD64 and ARM64 images on native GitHub-hosted
+runners, validate both Compose files, and scan images for fixable HIGH and
+CRITICAL vulnerabilities. Merges to `master` publish a multi-platform image to
+GHCR tagged with the source commit, with BuildKit SBOM and provenance
+attestations. The deployment artifact is always selected by its immutable
+digest, not by a mutable tag. The ROCK 5B does not build images and is not
+modified by this workflow.
+
+The container workflow is `.github/workflows/container.yml`. Container tests
+are opt-in locally:
+
+```bash
+CC_RUN_CONTAINER_TESTS=1 pytest tests/test_container.py -q
+```
+
+Normal WSL development continues to use `uv`, direct Python execution, the
+legacy runner, pytest, Ruff and mypy; Docker Compose is an integration-test
+environment rather than a prerequisite for every edit.

@@ -66,3 +66,34 @@ hermes
 Hermes configuration and credentials remain in the WSL Hermes home and are
 independent of the Windows installation. Do not copy the Windows `.env`, auth
 files or operational data.
+
+## Container integration checks
+
+Docker is optional for ordinary development. When Docker Desktop or another
+Docker engine is available through WSL, the development Compose environment
+uses synthetic named volumes and loopback-only host publishing:
+
+```bash
+docker compose up --build
+docker compose ps
+docker compose logs -f command-centre
+docker compose down
+```
+
+Run the black-box container contract tests explicitly:
+
+```bash
+CC_RUN_CONTAINER_TESTS=1 uv run pytest tests/test_container.py -q
+```
+
+The production example is deliberately not runnable without explicit values:
+`compose.production.example.yaml` requires an immutable GHCR digest, existing
+data and backup directories, an exact allowed hostname, and the expected
+Tailscale identity. The container binds to `0.0.0.0` only inside its network
+namespace; Compose publishes it to host loopback. No Tailscale software runs
+inside the application image.
+
+Container images are built for both `linux/amd64` and `linux/arm64`. GitHub
+Actions validates each architecture, scans the final image, and publishes a
+commit-tagged multi-platform artifact with SBOM and provenance attestations
+after a protected merge to `master`. Phase 5 does not deploy to the ROCK 5B.
