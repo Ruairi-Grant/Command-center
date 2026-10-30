@@ -72,9 +72,19 @@ def raw_request(url, method="POST", payload=None, headers=None, body=None):
         return e.code, e.read().decode("utf-8"), dict(e.headers)
 
 
+TEST_MAGICDNS_HOST = "dashboard.example.test"
+TEST_LOGIN = "test-user@example.invalid"
+
+
 def main():
     home = tempfile.mkdtemp(prefix="cc-dash-")
-    env = dict(os.environ, CC_HOME=home, CC_PORT=str(PORT))
+    env = dict(
+        os.environ,
+        CC_HOME=home,
+        CC_PORT=str(PORT),
+        CC_ALLOWED_HOSTS=TEST_MAGICDNS_HOST,
+        CC_EXPECTED_TS_LOGIN=TEST_LOGIN,
+    )
     srv = subprocess.Popen([PY, os.path.join(LIB, "cc_dashboard.py")],
                            env=env, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, text=True)
@@ -178,9 +188,14 @@ def main():
         print("[security] unknown POST routes -> 404")
 
         # --- 9. localhost-only bind ---
-        out = subprocess.run(["netstat", "-an"], capture_output=True, text=True).stdout
-        listening = [l for l in out.splitlines()
-                     if ":%d " % PORT in l and "LISTENING" in l]
+        if shutil.which("ss"):
+            out = subprocess.run(["ss", "-ltn"], capture_output=True, text=True).stdout
+            listening = [l for l in out.splitlines()
+                         if ":%d" % PORT in l and "LISTEN" in l]
+        else:
+            out = subprocess.run(["netstat", "-an"], capture_output=True, text=True).stdout
+            listening = [l for l in out.splitlines()
+                         if ":%d " % PORT in l and "LISTENING" in l]
         assert listening, "no listener found"
         assert all("127.0.0.1:%d" % PORT in l for l in listening), \
             "dashboard not bound to localhost: %r" % listening
@@ -233,8 +248,8 @@ def main():
         # --- 12a. M2: the PC's exact MagicDNS hostname is accepted ---
         st, body, hdrs = raw_request(
             base + "/api/tasks/create", payload={"title": "M2 magicdns host"},
-            headers={"Host": "desktop-s7i2r4o.tail7d2d07.ts.net",
-                     "Origin": "https://desktop-s7i2r4o.tail7d2d07.ts.net",
+            headers={"Host": TEST_MAGICDNS_HOST,
+                     "Origin": "https://" + TEST_MAGICDNS_HOST,
                      "Content-Type": "application/json"})
         assert st == 201, "MagicDNS Host+Origin rejected: %s %s" % (st, body)
         print("[M2] PC MagicDNS Host + matching Origin accepted (201)")
@@ -243,8 +258,8 @@ def main():
         before = len(open(os.path.join(home, "data/tasks.jsonl"), encoding="utf-8").readlines())
         st, body, hdrs = raw_request(
             base + "/api/tasks/create", payload={"title": "M2 wrong tailnet host"},
-            headers={"Host": "ruairs-s24.tail7d2d07.ts.net",
-                     "Origin": "https://ruairs-s24.tail7d2d07.ts.net",
+            headers={"Host": "other.example.test",
+                     "Origin": "https://other.example.test",
                      "Content-Type": "application/json"})
         assert st == 403, "another tailnet host was accepted: %s %s" % (st, body)
         after = len(open(os.path.join(home, "data/tasks.jsonl"), encoding="utf-8").readlines())
@@ -252,9 +267,9 @@ def main():
         print("[M2] other tailnet hostname -> 403, no write (exact host only)")
 
         # --- 12c. M2: a WILDCARD/subdomain must NOT match (no wildcarding) ---
-        for bad_host in ("evil.tail7d2d07.ts.net",
-                         "desktop-s7i2r4o.tail7d2d07.ts.net.evil.com",
-                         "sub.desktop-s7i2r4o.tail7d2d07.ts.net"):
+        for bad_host in ("evil.example.test",
+                         "dashboard.example.test.evil.com",
+                         "sub.dashboard.example.test"):
             st, body, hdrs = raw_request(
                 base + "/api/tasks/create", payload={"title": "M2 wildcard probe"},
                 headers={"Host": bad_host, "Content-Type": "application/json"})
@@ -341,9 +356,14 @@ def main():
               % (st, body.strip()[:90]))
 
         # --- 17. binding unchanged ---
-        out = subprocess.run(["netstat", "-an"], capture_output=True, text=True).stdout
-        listening = [l for l in out.splitlines()
-                     if ":%d " % PORT in l and "LISTENING" in l]
+        if shutil.which("ss"):
+            out = subprocess.run(["ss", "-ltn"], capture_output=True, text=True).stdout
+            listening = [l for l in out.splitlines()
+                         if ":%d" % PORT in l and "LISTEN" in l]
+        else:
+            out = subprocess.run(["netstat", "-an"], capture_output=True, text=True).stdout
+            listening = [l for l in out.splitlines()
+                         if ":%d " % PORT in l and "LISTENING" in l]
         assert listening and all("127.0.0.1:%d" % PORT in l for l in listening), \
             "dashboard not bound to localhost: %r" % listening
         print("[bind] still 127.0.0.1 only: %s" % listening[0].strip())
@@ -365,8 +385,8 @@ def main():
                 _fh.writelines(_good)
 
         # === IDENTITY GATE TESTS (Tailscale Serve provenance) ===
-        MAGIC = "desktop-s7i2r4o.tail7d2d07.ts.net"
-        LOGIN = "ruairi.j.grant@gmail.com"
+        MAGIC = TEST_MAGICDNS_HOST
+        LOGIN = TEST_LOGIN
 
         # --- 18. valid Serve request (provenance + correct identity) accepted ---
         st, body, hdrs = raw_request(
@@ -416,7 +436,7 @@ def main():
             base + "/api/tasks/create", payload={"title": "fake provenance"},
             headers={"Host": MAGIC, "Origin": "https://" + MAGIC,
                      "X-Forwarded-Proto": "https",
-                     "X-Forwarded-Host": "evil.tail7d2d07.ts.net",
+                     "X-Forwarded-Host": "evil.example.test",
                      "Tailscale-User-Login": "attacker@evil.com",
                      "Content-Type": "application/json"})
         # forwarded-host != PC -> not Serve-mode -> identity not checked ->

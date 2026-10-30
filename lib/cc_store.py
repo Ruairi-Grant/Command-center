@@ -90,7 +90,8 @@ STORE_NAMES = ("prod", "dev")
 
 
 def _configured_home():
-    return os.environ.get("CC_HOME", os.path.join(DEFAULT_HOME, "command-center-prod"))
+    configured = os.environ.get("CC_DATA_DIR") or os.environ.get("CC_HOME")
+    return configured or os.path.join(DEFAULT_HOME, "command-center-prod")
 
 
 def _named_store_home(name):
@@ -127,7 +128,7 @@ def get_home():
     override = STORE_OVERRIDE.get("home")
     if override:
         return override
-    return os.environ.get("CC_HOME", DEFAULT_HOME)
+    return os.environ.get("CC_DATA_DIR") or os.environ.get("CC_HOME") or DEFAULT_HOME
 
 
 def data_dir(home=None):
@@ -135,6 +136,8 @@ def data_dir(home=None):
 
 
 def backup_dir(home=None):
+    if home is None and os.environ.get("CC_BACKUP_DIR"):
+        return os.environ["CC_BACKUP_DIR"]
     return os.path.join(home or get_home(), "backups")
 
 

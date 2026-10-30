@@ -34,42 +34,25 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cc_config  # noqa: E402
 import cc_store as cc  # noqa: E402
 
 UI_VERSION = "0.4.0"
 
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("CC_PORT", "8787"))
+CONFIG = cc_config.load()
+HOST = CONFIG.bind_host
+PORT = CONFIG.port
 
-# Host allowlist. The dashboard is served from localhost, so requests
-# normally carry a loopback Host header. The port is part of the Host
-# header and varies (default 8787, tests use others), so hosts are matched
-# by hostname only — the port is stripped before comparison.
-#
-# PC_MAGICDNS_HOST is this machine's exact Tailscale MagicDNS hostname.
-# It is added so that requests proxied through Tailscale Serve (which
-# forwards the tailnet hostname) are not rejected by the Host/Origin
-# checks. This is an EXACT hostname, never a wildcard. NOTE: adding it
-# here is NOT authentication — it only stops the anti-cross-origin checks
-# from blocking legitimate proxied traffic. Access control is a separate,
-# still-pending concern (see Phase 4).
-PC_MAGICDNS_HOST = "desktop-s7i2r4o.tail7d2d07.ts.net"
+# Host allowlist. Loopback is always accepted. Remote hostnames must be
+# explicitly configured; no personal infrastructure is embedded in source.
 LOCAL_HOSTNAMES = ("127.0.0.1", "localhost", "[::1]")
-_extra = [h.strip() for h in os.environ.get("CC_ALLOWED_HOSTS", "").split(",") if h.strip()]
-ALLOWED_HOSTNAMES = frozenset(LOCAL_HOSTNAMES) | {PC_MAGICDNS_HOST} | frozenset(_extra)
+ALLOWED_HOSTNAMES = frozenset(LOCAL_HOSTNAMES) | frozenset(CONFIG.allowed_hosts)
+SERVE_HOSTNAMES = frozenset(CONFIG.allowed_hosts)
 
-# Origin policy for state-changing requests:
-#   - A request with no Origin header is allowed. This is the normal case
-#     for the dashboard's own fetch() calls and for curl/API clients —
-#     browsers only send Origin on cross-origin or form submissions, never
-#     on a same-origin fetch(). Missing Origin therefore means "not a
-#     browser cross-origin request" and is safe to allow.
-#   - If Origin is present it MUST name an allowed hostname: loopback, or
-#     the PC's exact MagicDNS hostname (so the page served through
-#     Tailscale Serve can make its own same-origin fetch() calls). Any
-#     other cross-origin request is refused.
-# Validation is done explicitly here; we do NOT rely on CORS preflight
-# behaviour, which is incidental and easily broken by config changes.
+# A request with Serve provenance is accepted only when the configured
+# identity matches. Production configuration fails closed at startup when
+# identity verification is enabled without an expected login.
+EXPECTED_TS_LOGIN = CONFIG.expected_tailscale_login
 
 MAX_BODY = 10000
 
@@ -110,43 +93,24 @@ def _origin_ok(handler):
     return False, "foreign-origin"
 
 
-# --- Remote-request identity gate (Tailscale Serve) ---------------------
-#
-# The dashboard has NO application login. Remote access is protected by
-# requiring that requests arriving THROUGH Tailscale Serve carry the
-# intended Tailscale identity. Design and its limits, established by
-# empirical test against the installed Tailscale 1.104.1:
-#
-#   * Serve STRIPS any client-supplied Tailscale-User-Login /
-#     X-Forwarded-For headers and replaces them with the real ones, so a
-#     remote tailnet caller cannot forge the identity through Serve.
-#   * A local process can still hit 127.0.0.1:8787 directly and forge any
-#     header. So an identity header ALONE is NOT proof of provenance.
-#
-# Therefore we only enforce identity on requests that show Serve
-# provenance: X-Forwarded-Proto == https AND X-Forwarded-Host == the PC's
-# MagicDNS hostname. Such requests MUST also carry
-# Tailscale-User-Login == EXPECTED_TS_LOGIN. Plain localhost requests
-# (no such forwarded headers) are local-mode and behave as before.
-#
-# A local attacker CAN set these forwarded headers themselves to enter
-# remote mode and present a valid-looking identity — this gate does NOT
-# stop a malicious local process (documented, accepted limitation). It
-# DOES stop every remote tailnet device except the intended identity,
-# which is the boundary this feature is responsible for.
-EXPECTED_TS_LOGIN = "ruairi.j.grant@gmail.com"
+# --- Remote-request identity gate ---------------------------------------
+# A local process can forge forwarded headers; this check protects the
+# configured reverse-proxy boundary, not against local attackers. Exact
+# hostname and identity values are supplied through environment configuration.
 
 
 def _is_serve_request(handler):
-    """True when the request shows Tailscale Serve provenance."""
+    """True when the request shows configured Tailscale Serve provenance."""
     proto = (handler.headers.get("X-Forwarded-Proto") or "").strip().lower()
     fwd_host = (handler.headers.get("X-Forwarded-Host") or "").strip().lower()
-    return proto == "https" and fwd_host == PC_MAGICDNS_HOST
+    return proto == "https" and fwd_host in SERVE_HOSTNAMES
 
 
 def _identity_ok(handler):
     """Identity check for Serve-proxied requests. Returns (ok, reason)."""
     login = (handler.headers.get("Tailscale-User-Login") or "").strip()
+    if not EXPECTED_TS_LOGIN:
+        return False, "identity-not-configured"
     if not login:
         return False, "missing-identity"
     if login.lower() != EXPECTED_TS_LOGIN.lower():
@@ -896,6 +860,10 @@ setInterval(load, 30000);
 """
 
 
+class ReusableHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CommandCentre/0.1"
 
@@ -1093,13 +1061,14 @@ def main():
     # and never disturb the healthy running instance.
     try:
         _probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         _probe.bind((HOST, PORT))
         _probe.close()
     except OSError:
         print("Another dashboard already listening on %s:%d — exiting." % (HOST, PORT),
               flush=True)
         return 0
-    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    srv = ReusableHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     print("Command Centre dashboard: http://%s:%d  (localhost only)" % (HOST, PORT))
     print("Data home: %s" % cc.get_home())
