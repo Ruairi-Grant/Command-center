@@ -8,12 +8,13 @@ Verifies:
 
 Uses an isolated temp home so real data is never touched.
 """
+
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
-import shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(os.path.dirname(HERE), "lib")
@@ -22,8 +23,7 @@ PY = sys.executable
 
 
 def run(args, env):
-    return subprocess.run([PY, STORE] + args, capture_output=True,
-                          text=True, env=env, timeout=120)
+    return subprocess.run([PY, STORE] + args, capture_output=True, text=True, env=env, timeout=120)
 
 
 def test_status_defaults():
@@ -34,6 +34,7 @@ def test_status_defaults():
     """
     sys.path.insert(0, LIB)
     import cc_store as cc
+
     home = tempfile.mkdtemp(prefix="cc-status-")
     os.environ["CC_HOME"] = home
     cc.DEFAULT_HOME = home
@@ -52,7 +53,10 @@ def test_status_defaults():
             t = cc.create_task("test", title="explicit " + s, **kwargs)
             assert t["status"] == s, "explicit status %r not preserved: %r" % (s, t["status"])
         kwargs = {"status": "waiting", "waiting_on": "a response"}
-        print("[defaults] explicit statuses preserved:", [cc.create_task("test", title="x", **kwargs)["status"]])
+        print(
+            "[defaults] explicit statuses preserved:",
+            [cc.create_task("test", title="x", **kwargs)["status"]],
+        )
 
         # 3. explicit priority preserved
         t3 = cc.create_task("test", title="prio", priority="high")
@@ -61,11 +65,15 @@ def test_status_defaults():
 
         # 4. partial update still merges only provided fields
         t4 = cc.update_task("test", t1["id"], priority="low")
-        assert t4["status"] == "active" and t4["priority"] == "low" and t4["title"] == "no status given", \
-            "partial update changed untouched fields: %r" % t4
+        assert (
+            t4["status"] == "active"
+            and t4["priority"] == "low"
+            and t4["title"] == "no status given"
+        ), "partial update changed untouched fields: %r" % t4
         t5 = cc.update_task("test", t1["id"], status="active")
-        assert t5["status"] == "active" and t5["priority"] == "low" and t5["completed_at"] is None, \
-            "status update clobbered other fields: %r" % t5
+        assert (
+            t5["status"] == "active" and t5["priority"] == "low" and t5["completed_at"] is None
+        ), "status update clobbered other fields: %r" % t5
         print("[defaults] partial update/merge behaviour unchanged")
 
         # 5. invalid status still rejected
@@ -89,7 +97,6 @@ def main():
     home = tempfile.mkdtemp(prefix="cc-test-")
     env = dict(os.environ, CC_HOME=home)
     print("test home:", home)
-    ok = True
 
     # 0. init
     r = run(["init"], env)
@@ -98,11 +105,14 @@ def main():
 
     # 1. rapid sequential mutations -> no corruption
     for i in range(40):
-        r = run(["tasks", "add", "--title", "t%d" % i,
-                 "--priority", ["high", "normal", "low"][i % 3]], env)
+        r = run(
+            ["tasks", "add", "--title", "t%d" % i, "--priority", ["high", "normal", "low"][i % 3]],
+            env,
+        )
         assert r.returncode == 0, (i, r.stderr)
-    tasks = [json.loads(l) for l in open(os.path.join(home, "data/tasks.jsonl"))
-             if l.strip()]
+    tasks = [
+        json.loads(line) for line in open(os.path.join(home, "data/tasks.jsonl")) if line.strip()
+    ]
     assert len(tasks) == 40, "expected 40 tasks, got %d" % len(tasks)
     print("[atomic-sequential] 40 tasks, all lines valid JSON")
 
@@ -110,6 +120,7 @@ def main():
     sys.path.insert(0, LIB)
     os.environ["CC_HOME"] = home
     import cc_store as cc
+
     cc.DEFAULT_HOME = home
     import threading
 
@@ -138,7 +149,7 @@ def main():
     # 3. backup snapshot exists and restore reproduces exactly
     # NOTE: retention auto-prunes old snapshots (keep=20) as mutations run,
     # so use the NEWEST snapshot, which is always retained.
-    bdir = os.path.join(home, "backups")
+    os.path.join(home, "backups")
     snaps = cc.list_snapshots(home)
     assert snaps, "no backups created"
     print("[backup] snapshots created: %d (retention keep=%d)" % (len(snaps), cc.get_backup_keep()))
@@ -150,22 +161,27 @@ def main():
     pre_restore = cc.load_kind("tasks")
     r = run(["restore", "--from", target_snap, "--yes"], env)
     assert r.returncode == 0, r.stderr
-    snap_tasks = [json.loads(l) for l in
-                  open(os.path.join(target_snap, "tasks.jsonl")) if l.strip()]
+    snap_tasks = [
+        json.loads(line) for line in open(os.path.join(target_snap, "tasks.jsonl")) if line.strip()
+    ]
     after = cc.load_kind("tasks")
-    assert len(after) == len(snap_tasks), \
-        "restore mismatch: %d vs snapshot %d" % (len(after), len(snap_tasks))
+    assert len(after) == len(snap_tasks), "restore mismatch: %d vs snapshot %d" % (
+        len(after),
+        len(snap_tasks),
+    )
     print("[restore] restored from %s -> %d records match snapshot" % (target_name, len(after)))
     assert pre_restore[0]["status"] == "done"
     assert after[0]["status"] != "done", "restore did not revert the completion"
     print("[restore] post-mutation change correctly reverted")
 
     # 4. activity log is append-only and grows
-    act = [json.loads(l) for l in
-           open(os.path.join(home, "data/activity.jsonl")) if l.strip()]
+    act = [
+        json.loads(line) for line in open(os.path.join(home, "data/activity.jsonl")) if line.strip()
+    ]
     assert len(act) >= 100, "activity log too short: %d" % len(act)
-    assert all(set(a) == {"ts", "actor", "action", "target", "detail"} for a in act), \
+    assert all(set(a) == {"ts", "actor", "action", "target", "detail"} for a in act), (
         "activity records have unexpected shape"
+    )
     print("[activity] %d append-only entries, uniform shape" % len(act))
 
     shutil.rmtree(home, ignore_errors=True)
