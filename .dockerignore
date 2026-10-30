@@ -1,0 +1,25 @@
+# Git and Python caches
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local and operational state
+data/
+backups/
+logs/
+command-center-prod/
+command-center-dev/
+*.jsonl
+.cc.lock*
+.env
+.env.*
+!.env.example
+
+# Documentation and source remain in the image context.

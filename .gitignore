@@ -18,3 +18,26 @@ __pycache__/
 # Temp files written next to data during atomic writes
 *.tmp-*
 .tmp-*
+
+# Development environments and generated reports
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Container and editor-local files
+compose.override.yaml
+docker-compose.override.yml
+.vscode/

@@ -30,46 +30,33 @@ import json
 import os
 import socket
 import sys
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cc_config  # noqa: E402
 import cc_store as cc  # noqa: E402
 
 UI_VERSION = "0.4.0"
 
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("CC_PORT", "8787"))
+CONFIG = cc_config.load()
+assert CONFIG.data_home is not None
+assert CONFIG.backup_home is not None
+os.environ["CC_DATA_DIR"] = CONFIG.data_home
+os.environ["CC_BACKUP_DIR"] = CONFIG.backup_home
+STORE = cc.Store.from_config(CONFIG)
+HOST = CONFIG.bind_host
+PORT = CONFIG.port
 
-# Host allowlist. The dashboard is served from localhost, so requests
-# normally carry a loopback Host header. The port is part of the Host
-# header and varies (default 8787, tests use others), so hosts are matched
-# by hostname only — the port is stripped before comparison.
-#
-# PC_MAGICDNS_HOST is this machine's exact Tailscale MagicDNS hostname.
-# It is added so that requests proxied through Tailscale Serve (which
-# forwards the tailnet hostname) are not rejected by the Host/Origin
-# checks. This is an EXACT hostname, never a wildcard. NOTE: adding it
-# here is NOT authentication — it only stops the anti-cross-origin checks
-# from blocking legitimate proxied traffic. Access control is a separate,
-# still-pending concern (see Phase 4).
-PC_MAGICDNS_HOST = "desktop-s7i2r4o.tail7d2d07.ts.net"
+# Host allowlist. Loopback is always accepted. Remote hostnames must be
+# explicitly configured; no personal infrastructure is embedded in source.
 LOCAL_HOSTNAMES = ("127.0.0.1", "localhost", "[::1]")
-_extra = [h.strip() for h in os.environ.get("CC_ALLOWED_HOSTS", "").split(",") if h.strip()]
-ALLOWED_HOSTNAMES = frozenset(LOCAL_HOSTNAMES) | {PC_MAGICDNS_HOST} | frozenset(_extra)
+ALLOWED_HOSTNAMES = frozenset(LOCAL_HOSTNAMES) | frozenset(CONFIG.allowed_hosts)
+SERVE_HOSTNAMES = frozenset(CONFIG.allowed_hosts)
 
-# Origin policy for state-changing requests:
-#   - A request with no Origin header is allowed. This is the normal case
-#     for the dashboard's own fetch() calls and for curl/API clients —
-#     browsers only send Origin on cross-origin or form submissions, never
-#     on a same-origin fetch(). Missing Origin therefore means "not a
-#     browser cross-origin request" and is safe to allow.
-#   - If Origin is present it MUST name an allowed hostname: loopback, or
-#     the PC's exact MagicDNS hostname (so the page served through
-#     Tailscale Serve can make its own same-origin fetch() calls). Any
-#     other cross-origin request is refused.
-# Validation is done explicitly here; we do NOT rely on CORS preflight
-# behaviour, which is incidental and easily broken by config changes.
+# A request with Serve provenance is accepted only when the configured
+# identity matches. Production configuration fails closed at startup when
+# identity verification is enabled without an expected login.
+EXPECTED_TS_LOGIN = CONFIG.expected_tailscale_login
 
 MAX_BODY = 10000
 
@@ -98,7 +85,7 @@ def _origin_ok(handler):
     """Origin policy for POST requests. Returns (ok, reason)."""
     origin = (handler.headers.get("Origin") or "").strip()
     if not origin:
-        return True, "no-origin"          # same-origin fetch / API client
+        return True, "no-origin"  # same-origin fetch / API client
     # Origin looks like scheme://host[:port]
     try:
         rest = origin.split("://", 1)[1]
@@ -110,48 +97,30 @@ def _origin_ok(handler):
     return False, "foreign-origin"
 
 
-# --- Remote-request identity gate (Tailscale Serve) ---------------------
-#
-# The dashboard has NO application login. Remote access is protected by
-# requiring that requests arriving THROUGH Tailscale Serve carry the
-# intended Tailscale identity. Design and its limits, established by
-# empirical test against the installed Tailscale 1.104.1:
-#
-#   * Serve STRIPS any client-supplied Tailscale-User-Login /
-#     X-Forwarded-For headers and replaces them with the real ones, so a
-#     remote tailnet caller cannot forge the identity through Serve.
-#   * A local process can still hit 127.0.0.1:8787 directly and forge any
-#     header. So an identity header ALONE is NOT proof of provenance.
-#
-# Therefore we only enforce identity on requests that show Serve
-# provenance: X-Forwarded-Proto == https AND X-Forwarded-Host == the PC's
-# MagicDNS hostname. Such requests MUST also carry
-# Tailscale-User-Login == EXPECTED_TS_LOGIN. Plain localhost requests
-# (no such forwarded headers) are local-mode and behave as before.
-#
-# A local attacker CAN set these forwarded headers themselves to enter
-# remote mode and present a valid-looking identity — this gate does NOT
-# stop a malicious local process (documented, accepted limitation). It
-# DOES stop every remote tailnet device except the intended identity,
-# which is the boundary this feature is responsible for.
-EXPECTED_TS_LOGIN = "ruairi.j.grant@gmail.com"
+# --- Remote-request identity gate ---------------------------------------
+# A local process can forge forwarded headers; this check protects the
+# configured reverse-proxy boundary, not against local attackers. Exact
+# hostname and identity values are supplied through environment configuration.
 
 
 def _is_serve_request(handler):
-    """True when the request shows Tailscale Serve provenance."""
+    """True when the request shows configured Tailscale Serve provenance."""
     proto = (handler.headers.get("X-Forwarded-Proto") or "").strip().lower()
     fwd_host = (handler.headers.get("X-Forwarded-Host") or "").strip().lower()
-    return proto == "https" and fwd_host == PC_MAGICDNS_HOST
+    return proto == "https" and fwd_host in SERVE_HOSTNAMES
 
 
 def _identity_ok(handler):
     """Identity check for Serve-proxied requests. Returns (ok, reason)."""
     login = (handler.headers.get("Tailscale-User-Login") or "").strip()
+    if not EXPECTED_TS_LOGIN:
+        return False, "identity-not-configured"
     if not login:
         return False, "missing-identity"
     if login.lower() != EXPECTED_TS_LOGIN.lower():
         return False, "unexpected-identity"
     return True, "ok"
+
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -214,6 +183,27 @@ PAGE = """<!doctype html>
   .org-due { margin: 8px 0 6px 22px; font-size: 13px; color: #d4b978; }
   .org-children { margin: 12px 0 0 20px; }
   .org-action { font-size: 10px; padding: 2px 6px; margin-left: 5px; }
+  .org-open, .task-open { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0; font: inherit; text-align: left; }
+  .org-open:hover, .task-open:hover { text-decoration: underline; }
+  .detail-backdrop { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    padding: 20px; background: rgba(0,0,0,.62); z-index: 20; }
+  .detail-backdrop.open { display: flex; }
+  .detail-window { width: min(680px, 100%); max-height: min(760px, 90vh); overflow: auto;
+    background: #161a24; border: 1px solid #3a455c; border-radius: 12px; padding: 18px;
+    box-shadow: 0 20px 70px rgba(0,0,0,.45); }
+  .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+  .detail-header h2 { margin: 0; font-size: 21px; }
+  .detail-meta, .detail-notes, .detail-children { margin-top: 16px; }
+  .detail-meta { color: #aeb7c9; font-size: 13px; }
+  .detail-notes { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; min-height: 42px;
+    background: #1d2330; border: 1px solid #2b3344; border-radius: 7px; }
+  .detail-children h3 { margin: 0 0 8px; font-size: 14px; }
+  .detail-child { display: block; width: 100%; margin: 5px 0; padding: 9px 10px; text-align: left;
+    background: #1d2330; border: 1px solid #333c4e; border-radius: 6px; color: #e6e8ee; cursor: pointer; }
+  .detail-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 18px; }
+  .detail-actions .org-action { margin-left: 0; font-size: 12px; padding: 6px 10px; }
+  .detail-actions .danger { border-color: #8a4545; color: #f4877f; }
+
   form.newtask { background: #161a24; border: 1px solid #262c3a; border-radius: 10px;
                  padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   form.newtask .field { display: flex; flex-direction: column; gap: 4px; }
@@ -233,7 +223,6 @@ PAGE = """<!doctype html>
 <header data-ui-version="__UI_VERSION__">
   <h1>Command Centre <span class="ui-version">UI v__UI_VERSION__</span></h1>
   <span class="meta" id="meta">loading…</span>
-  <button class="store" id="store" type="button" title="Switch data store">STORE: loading…</button>
 </header>
 <main id="app">
   <form class="newtask" id="newtask" autocomplete="off">
@@ -255,6 +244,11 @@ PAGE = """<!doctype html>
       <label for="nt-due">Due</label>
       <input id="nt-due" name="due" type="date">
       <button id="nt-clear-due" type="button" class="clear-date">Clear</button>
+    </div>
+    <div class="field" style="flex:1 1 140px" id="nt-follow-up-wrap" hidden>
+      <label for="nt-follow-up">Follow up</label>
+      <input id="nt-follow-up" name="follow_up_on" type="date">
+      <button id="nt-clear-follow-up" type="button" class="clear-date">Clear</button>
     </div>
     <div class="field" style="flex:0 0 140px" id="nt-status-wrap">
       <label for="nt-status">Status</label>
@@ -283,6 +277,19 @@ PAGE = """<!doctype html>
   <div id="list"><div class="empty">Loading…</div></div>
 </main>
 <div class="toast" id="toast"></div>
+<div class="detail-backdrop" id="org-detail" hidden>
+  <section class="detail-window" role="dialog" aria-modal="true" aria-labelledby="org-detail-title">
+    <div class="detail-header">
+      <h2 id="org-detail-title">Item details</h2>
+      <button id="org-detail-close" type="button">Close</button>
+    </div>
+    <div class="detail-meta" id="org-detail-meta"></div>
+    <h3>Notes</h3>
+    <div class="detail-notes" id="org-detail-notes"></div>
+    <div class="detail-children" id="org-detail-children"></div>
+    <div class="detail-actions" id="org-detail-actions"></div>
+  </section>
+</div>
 <script>
 const app = document.getElementById('app');
 const list = document.getElementById('list');
@@ -293,6 +300,9 @@ const ntKindStatus = document.getElementById('nt-status');
 const ntDue = document.getElementById('nt-due');
 const ntClearDue = document.getElementById('nt-clear-due');
 const ntDueWrap = document.getElementById('nt-due-wrap');
+const ntFollowUp = document.getElementById('nt-follow-up');
+const ntClearFollowUp = document.getElementById('nt-clear-follow-up');
+const ntFollowUpWrap = document.getElementById('nt-follow-up-wrap');
 const ntStatusWrap = document.getElementById('nt-status-wrap');
 const ntWaitingWrap = document.getElementById('nt-waiting-wrap');
 const ntWaiting = document.getElementById('nt-waiting');
@@ -302,8 +312,14 @@ const ntCancel = document.getElementById('nt-cancel');
 const orgTree = document.getElementById('organisation-tree');
 const orgAdd = document.getElementById('org-add');
 const meta = document.getElementById('meta');
-const store = document.getElementById('store');
 const toast = document.getElementById('toast');
+const orgDetail = document.getElementById('org-detail');
+const orgDetailTitle = document.getElementById('org-detail-title');
+const orgDetailMeta = document.getElementById('org-detail-meta');
+const orgDetailNotes = document.getElementById('org-detail-notes');
+const orgDetailChildren = document.getElementById('org-detail-children');
+const orgDetailActions = document.getElementById('org-detail-actions');
+const orgDetailClose = document.getElementById('org-detail-close');
 let toastTimer;
 let currentOrganisation = [];
 
@@ -327,10 +343,42 @@ function taskLi(t, today) {
   const label = overdue ? 'Overdue' : (t.due === today ? 'Due today' : esc(t.due || ''));
   return '<li>'
     + '<span class="prio ' + prio + '">' + prio + '</span>'
-    + '<span class="title">' + esc(t.title) + '</span>'
+    + '<button class="task-open" type="button" data-org-open="' + esc(t.id) + '">' + esc(t.title) + '</button>'
     + '<span class="due' + (overdue ? ' over' : '') + '">' + label + '</span>'
     + '<button data-id="' + esc(t.id) + '" data-previous-status="' + esc(t.status || 'active') + '">Done</button>'
     + '</li>';
+}
+
+function followUpLabel(t, today) {
+  if (!t.follow_up_on) return 'No follow-up date';
+  if (t.follow_up_on < today) return 'Follow-up overdue: ' + esc(t.follow_up_on);
+  if (t.follow_up_on === today) return 'Follow-up today';
+  return 'Follow-up: ' + esc(t.follow_up_on);
+}
+
+function waitingTaskLi(t, today) {
+  const waitingSince = t.waiting_since ? 'Waiting since: ' + esc(t.waiting_since) : 'Waiting since: ' + esc(t.created || 'unknown');
+  return '<li>'
+    + '<button class="task-open" type="button" data-org-open="' + esc(t.id) + '">' + esc(t.title) + '</button>'
+    + '<span class="waiting-on">Waiting on: ' + esc(t.waiting_on || 'external dependency') + '</span>'
+    + '<span class="waiting-since">' + waitingSince + '</span>'
+    + '<span class="follow-up">' + followUpLabel(t, today) + '</span>'
+    + '<button data-id="' + esc(t.id) + '" data-previous-status="waiting">Done</button>'
+    + '</li>';
+}
+
+function waitingSection(waiting, followups, today) {
+  const scheduled = new Set(followups.map(item => item.id));
+  const unscheduled = waiting.filter(item => !scheduled.has(item.id));
+  let html = '<h2>Waiting <span class="count">(' + waiting.length + ')</span></h2><div class="card">';
+  if (followups.length) {
+    html += '<h3>Follow-ups</h3><ul>' + followups.map(i => waitingTaskLi(i, today)).join('') + '</ul>';
+  }
+  if (unscheduled.length) {
+    html += '<h3>No follow-up date</h3><ul>' + unscheduled.map(i => waitingTaskLi(i, today)).join('') + '</ul>';
+  }
+  if (!waiting.length) html += '<div class="empty">Nothing here.</div>';
+  return html + '</div>';
 }
 
 function section(title, items, render, today) {
@@ -346,15 +394,18 @@ function syncNewItemFields() {
   const kind = ntKind.value;
   const isTask = kind === 'task';
   const isArea = kind === 'area';
+  const selectedStatus = ntKindStatus.value;
+  const statusOptions = isTask
+    ? ['active', 'waiting', 'done', 'cancelled']
+    : ['active', 'done', 'cancelled'];
   ntDueWrap.hidden = isArea;
   ntStatusWrap.hidden = isArea;
-  ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
-  ntKindStatus.innerHTML = (isTask
-    ? ['active', 'waiting', 'done', 'cancelled']
-    : ['active', 'done', 'cancelled'])
+  ntKindStatus.innerHTML = statusOptions
     .map(v => '<option value="' + v + '">' + v + '</option>').join('');
-  if (!ntKindStatus.value) ntKindStatus.value = 'active';
-  ntWaitingWrap.hidden = !isTask || ntKindStatus.value !== 'waiting';
+  ntKindStatus.value = statusOptions.includes(selectedStatus) ? selectedStatus : 'active';
+  const isWaiting = isTask && ntKindStatus.value === 'waiting';
+  ntWaitingWrap.hidden = !isWaiting;
+  ntFollowUpWrap.hidden = !isWaiting;
 }
 
 function resetUnifiedForm() {
@@ -368,7 +419,7 @@ function resetUnifiedForm() {
   ntParent.innerHTML = buildParentOptions(currentOrganisation, 'task', '');
 }
 
-function startUnifiedEdit(node) {
+function startUnifiedEdit(node, desiredStatus) {
   if (!node) return;
   ntId.value = node.id;
   ntKind.value = node.kind;
@@ -377,11 +428,12 @@ function startUnifiedEdit(node) {
     ? ['active', 'done', 'cancelled']
     : ['active', 'waiting', 'done', 'cancelled'])
     .map(v => '<option value="' + v + '">' + v + '</option>').join('');
-  ntKindStatus.value = node.status || 'active';
+  ntKindStatus.value = desiredStatus || node.status || 'active';
   syncNewItemFields();
   document.getElementById('nt-title').value = node.title || '';
   ntDue.value = node.due_source === 'explicit' ? (node.due || '') : '';
   ntWaiting.value = node.waiting_on || '';
+  ntFollowUp.value = node.follow_up_on || '';
   document.getElementById('nt-notes').value = node.notes || '';
   ntParent.innerHTML = buildParentOptions(currentOrganisation, node.kind, node.id);
   ntParent.value = node.parent_id || '';
@@ -394,13 +446,47 @@ function startUnifiedEdit(node) {
 function orgControls(n) {
   const done = n.kind !== 'area' && n.status !== 'done' && n.status !== 'cancelled'
     ? '<button class="org-action" type="button" data-org-complete="' + esc(n.id) + '" data-org-kind="' + esc(n.kind) + '">Done</button>' : '';
-  return done + '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
+  const wait = n.kind === 'task' && n.status === 'active'
+    ? '<button class="org-action" type="button" data-org-wait="' + esc(n.id) + '">Mark waiting</button>' : '';
+  const resume = n.kind === 'task' && n.status === 'waiting'
+    ? '<button class="org-action" type="button" data-org-resume="' + esc(n.id) + '">Resume</button>' : '';
+  return done + wait + resume + '<button class="org-action" type="button" data-org-edit="' + esc(n.id) + '">Edit</button>'
     + '<button class="org-action danger" type="button" data-org-delete="' + esc(n.id) + '">Delete</button>';
+}
+
+function openOrganisationDetail(id) {
+  const node = findOrganisationNode(currentOrganisation, id);
+  if (!node) return;
+  orgDetail.dataset.nodeId = node.id;
+  orgDetailTitle.textContent = node.title;
+  const status = node.kind === 'area' ? '' : ' · ' + (node.status || '');
+  const due = node.due ? ' · Due ' + node.due + (node.due_source === 'inherited' ? ' (inherited)' : '') : '';
+  const waiting = node.waiting_on ? ' · Waiting on ' + node.waiting_on : '';
+  const waitingSince = node.waiting_since ? ' · Waiting since ' + node.waiting_since : '';
+  const followUp = node.follow_up_on ? ' · Follow up ' + node.follow_up_on : '';
+  orgDetailMeta.textContent = node.kind + status + due + waiting + waitingSince + followUp;
+  orgDetailNotes.innerHTML = node.notes ? esc(node.notes) : '<span class="empty">No notes.</span>';
+  const children = node.child_headers || node.children || [];
+  orgDetailChildren.innerHTML = children.length
+    ? '<h3>Children</h3>' + children.map(child =>
+        '<button class="detail-child" type="button" data-org-detail-child="' + esc(child.id) + '">' +
+        esc(child.title) + ' · ' + esc(child.kind) + (child.status ? ' · ' + esc(child.status) : '') + '</button>').join('')
+    : '';
+  orgDetailActions.innerHTML = orgControls(node);
+  orgDetail.hidden = false;
+  orgDetail.classList.add('open');
+  orgDetailClose.focus();
+}
+
+function closeOrganisationDetail() {
+  orgDetail.classList.remove('open');
+  orgDetail.hidden = true;
+  delete orgDetail.dataset.nodeId;
 }
 
 function renderOrganisation(organisation, expandedIds) {
   function renderNode(n) {
-    const label = '<span class="org-label">' + esc(n.title) + '</span>'
+    const label = '<button class="org-open" type="button" data-org-open="' + esc(n.id) + '">' + esc(n.title) + '</button>'
       + '<span class="org-kind">' + esc(n.kind) + '</span>'
       + (n.kind === 'area' ? '' : '<span class="org-status ' + esc(n.status || '') + '">' + esc(n.status || '') + '</span>')
       + orgControls(n);
@@ -460,13 +546,54 @@ ntClearDue.addEventListener('click', () => {
   ntDue.value = '';
   ntDue.focus();
 });
+ntClearFollowUp.addEventListener('click', () => {
+  ntFollowUp.value = '';
+  ntFollowUp.focus();
+});
 ntCancel.addEventListener('click', resetUnifiedForm);
 orgAdd.addEventListener('click', () => {
   resetUnifiedForm();
   form.scrollIntoView({behavior: 'smooth', block: 'start'});
   document.getElementById('nt-title').focus();
 });
+async function resumeOrganisationItem(id, button) {
+  if (button) button.disabled = true;
+  try {
+    const r = await fetch('/api/organisation/update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({id: id, status: 'active'}),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    closeOrganisationDetail();
+    say('Resumed');
+    load();
+  } catch (e) {
+    if (button) button.disabled = false;
+    say('Resume failed: ' + e.message, true);
+  }
+}
+
 orgTree.addEventListener('click', async (ev) => {
+  const opener = ev.target.closest('button[data-org-open]');
+  if (opener) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openOrganisationDetail(opener.dataset.orgOpen);
+    return;
+  }
+  const wait = ev.target.closest('button[data-org-wait]');
+  if (wait) {
+    ev.stopPropagation();
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, wait.dataset.orgWait), 'waiting');
+    return;
+  }
+  const resume = ev.target.closest('button[data-org-resume]');
+  if (resume) {
+    ev.stopPropagation();
+    await resumeOrganisationItem(resume.dataset.orgResume, resume);
+    return;
+  }
   const complete = ev.target.closest('button[data-org-complete]');
   if (complete) {
     ev.stopPropagation();
@@ -505,6 +632,68 @@ orgTree.addEventListener('click', async (ev) => {
   }
 });
 
+orgDetailClose.addEventListener('click', closeOrganisationDetail);
+orgDetail.addEventListener('click', async (ev) => {
+  if (ev.target === orgDetail) { closeOrganisationDetail(); return; }
+  ev.stopPropagation();
+  const child = ev.target.closest('button[data-org-detail-child]');
+  if (child) {
+    openOrganisationDetail(child.dataset.orgDetailChild);
+    return;
+  }
+  const wait = ev.target.closest('button[data-org-wait]');
+  if (wait) {
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, wait.dataset.orgWait), 'waiting');
+    closeOrganisationDetail();
+    return;
+  }
+  const resume = ev.target.closest('button[data-org-resume]');
+  if (resume) {
+    await resumeOrganisationItem(resume.dataset.orgResume, resume);
+    return;
+  }
+  const complete = ev.target.closest('button[data-org-complete]');
+  if (complete) {
+    complete.disabled = true;
+    const kind = complete.dataset.orgKind;
+    const url = kind === 'task' ? '/api/tasks/complete' : '/api/organisation/update';
+    const body = kind === 'task' ? {id: complete.dataset.orgComplete} : {id: complete.dataset.orgComplete, status: 'done'};
+    try {
+      const r = await fetch(url, {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      closeOrganisationDetail();
+      say('Marked done', false, {id: complete.dataset.orgComplete, kind: kind});
+      load();
+    } catch (e) { complete.disabled = false; say('Failed: ' + e.message, true); }
+    return;
+  }
+  const del = ev.target.closest('button[data-org-delete]');
+  if (del) {
+    if (!window.confirm('Delete this item? Children must be moved or deleted first.')) return;
+    try {
+      const r = await fetch('/api/organisation/delete', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({id: del.dataset.orgDelete}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      closeOrganisationDetail();
+      say('Deleted'); load();
+    } catch (e) { say('Delete failed: ' + e.message, true); }
+    return;
+  }
+  const edit = ev.target.closest('button[data-org-edit]');
+  if (edit) {
+    closeOrganisationDetail();
+    startUnifiedEdit(findOrganisationNode(currentOrganisation, edit.dataset.orgEdit));
+  }
+});
+
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !orgDetail.hidden) closeOrganisationDetail();
+});
+
 async function load() {
   const scrollY = window.scrollY;
   const expandedIds = orgTree.dataset.rendered
@@ -525,50 +714,13 @@ async function load() {
   orgTree.innerHTML = renderOrganisation(currentOrganisation, expandedIds);
   orgTree.dataset.rendered = '1';
   window.scrollTo(0, scrollY);
-  updateStore();
   let html = '';
-  html += section('Waiting', s.waiting || [], taskLi, s.today);
+  html += waitingSection(s.waiting || [], s.waiting_followups || [], s.today);
   html += section('Overdue', s.overdue, taskLi, s.today);
   html += section('Due today', s.today_tasks, taskLi, s.today);
   html += section('Upcoming (7 days)', s.upcoming_tasks, taskLi, s.today);
   list.innerHTML = html;   // render into #list, never clobber the form
 }
-
-async function updateStore() {
-  try {
-    const r = await fetch('/api/store/switch');
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const j = await r.json();
-    const name = String(j.store || '').toUpperCase();
-    store.textContent = 'STORE: ' + name;
-    store.className = 'store ' + String(j.store || '').toLowerCase();
-    store.dataset.store = String(j.store || '').toLowerCase();
-  } catch (e) {
-    store.textContent = 'STORE: unavailable';
-    store.className = 'store';
-  }
-}
-
-store.addEventListener('click', async () => {
-  const current = store.dataset.store;
-  const next = current === 'dev' ? 'prod' : 'dev';
-  store.disabled = true;
-  try {
-    const r = await fetch('/api/store/switch', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({store: next}),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    await updateStore();
-    await load();
-    say('Switched to ' + next.toUpperCase());
-  } catch (e) {
-    say('Store switch failed: ' + e.message, true);
-  } finally {
-    store.disabled = false;
-  }
-});
 
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -585,7 +737,10 @@ form.addEventListener('submit', async (ev) => {
     payload.due = document.getElementById('nt-due').value || null;
     payload.status = ntKindStatus.value;
   }
-  if (kind === 'task') payload.waiting_on = ntWaiting.value.trim() || null;
+  if (kind === 'task') {
+    payload.waiting_on = ntWaiting.value.trim() || null;
+    if (payload.status === 'waiting') payload.follow_up_on = ntFollowUp.value || null;
+  }
   if (kind === 'task' && payload.status === 'waiting' && !payload.waiting_on) {
     say('Waiting on is required for waiting tasks', true); return;
   }
@@ -635,6 +790,13 @@ toast.addEventListener('click', async (ev) => {
 // and only act on buttons that actually carry a record id.
 app.addEventListener('click', async (ev) => {
   if (form.contains(ev.target)) return;      // form handles its own controls
+  const opener = ev.target.closest('button[data-org-open]');
+  if (opener) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    openOrganisationDetail(opener.dataset.orgOpen);
+    return;
+  }
   const b = ev.target.closest('button[data-id]');
   if (!b) return;
   const taskId = b.dataset.id;
@@ -662,6 +824,10 @@ setInterval(load, 30000);
 </body>
 </html>
 """
+
+
+class ReusableHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -709,8 +875,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST":
             ok, why = _origin_ok(self)
             if not ok:
-                _log(self, "rejected: unexpected Origin %r (%s)"
-                     % (self.headers.get("Origin"), why))
+                _log(
+                    self, "rejected: unexpected Origin %r (%s)" % (self.headers.get("Origin"), why)
+                )
                 self._send_json({"error": "forbidden"}, 403)
                 return False
         # Serve-proxied requests must also present the intended identity.
@@ -718,8 +885,11 @@ class Handler(BaseHTTPRequestHandler):
         if _is_serve_request(self):
             ok, why = _identity_ok(self)
             if not ok:
-                _log(self, "rejected: identity check failed (%s) login=%r"
-                     % (why, self.headers.get("Tailscale-User-Login")))
+                _log(
+                    self,
+                    "rejected: identity check failed (%s) login=%r"
+                    % (why, self.headers.get("Tailscale-User-Login")),
+                )
                 self._send_json({"error": "forbidden"}, 403)
                 return False
         return True
@@ -743,13 +913,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._guard():
                 return
-            if self.path in ("/", "/index.html"):
+            if self.path == "/health/live":
+                self._send_json({"status": "ok"})
+            elif self.path == "/health/ready":
+                try:
+                    STORE.build_state()
+                    self._send_json({"status": "ready"})
+                except Exception as exc:
+                    _log(self, "readiness check failed: %s" % exc)
+                    self._send_json({"status": "not_ready"}, 503)
+            elif self.path in ("/", "/index.html"):
                 self._send_html(PAGE.replace("__UI_VERSION__", UI_VERSION))
-            elif self.path == "/api/store/switch":
-                self._send_json({"store": cc.current_store_name()})
             elif self.path.startswith("/api/state"):
                 try:
-                    self._send_json(cc.build_state())
+                    self._send_json(STORE.build_state())
                 except cc.CCError as exc:
                     # M1: expected application error -> generic to client,
                     # detail logged server-side.
@@ -766,30 +943,31 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._guard():
                 return
-            if self.path == "/api/store/switch":
-                body = self._read_json()
-                if not isinstance(body, dict):
-                    self._send_json({"error": "invalid JSON body"}, 400)
-                    return
-                name = body.get("store")
-                if not isinstance(name, str) or name not in cc.STORE_NAMES:
-                    self._send_json({"error": "store must be 'prod' or 'dev'"}, 400)
-                    return
-                cc.set_store(name)
-                cc.init()
-                self._send_json({"ok": True, "store": cc.current_store_name()})
-                return
             body = self._read_json()
             if not isinstance(body, dict):
                 self._send_json({"error": "invalid JSON body"}, 400)
                 return
             try:
                 if self.path == "/api/organisation/create":
-                    fields = {k: body[k] for k in (
-                        "title", "kind", "parent_id", "status", "priority",
-                        "next_action", "done_when", "waiting_on", "notes", "due", "target"
-                    ) if k in body}
-                    rec = cc.create_organisation("dashboard", **fields)
+                    fields = {
+                        k: body[k]
+                        for k in (
+                            "title",
+                            "kind",
+                            "parent_id",
+                            "status",
+                            "priority",
+                            "next_action",
+                            "done_when",
+                            "waiting_on",
+                            "follow_up_on",
+                            "notes",
+                            "due",
+                            "target",
+                        )
+                        if k in body
+                    }
+                    rec = STORE.create_organisation("dashboard", **fields)
                     self._send_json({"ok": True, "record": rec}, 201)
                     return
                 if self.path == "/api/organisation/update":
@@ -797,11 +975,25 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    fields = {k: body[k] for k in (
-                        "title", "kind", "parent_id", "status", "priority",
-                        "next_action", "done_when", "waiting_on", "notes", "due", "target"
-                    ) if k in body}
-                    rec = cc.update_organisation("dashboard", rid, **fields)
+                    fields = {
+                        k: body[k]
+                        for k in (
+                            "title",
+                            "kind",
+                            "parent_id",
+                            "status",
+                            "priority",
+                            "next_action",
+                            "done_when",
+                            "waiting_on",
+                            "follow_up_on",
+                            "notes",
+                            "due",
+                            "target",
+                        )
+                        if k in body
+                    }
+                    rec = STORE.update_organisation("dashboard", rid, **fields)
                     self._send_json({"ok": True, "record": rec})
                     return
                 if self.path == "/api/organisation/delete":
@@ -809,7 +1001,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.delete_organisation("dashboard", rid)
+                    rec = STORE.delete_organisation("dashboard", rid)
                     self._send_json({"ok": True, "record": rec})
                     return
                 if self.path == "/api/tasks/restore":
@@ -817,7 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.restore_task("dashboard", rid)
+                    rec = STORE.restore_task("dashboard", rid)
                     self._send_json({"ok": True, "record": rec})
                     return
                 if self.path == "/api/tasks/create":
@@ -826,7 +1018,7 @@ class Handler(BaseHTTPRequestHandler):
                         if k in body and body[k] not in (None, ""):
                             fields[k] = body[k]
                     # new tasks always start at active unless changed later.
-                    rec = cc.create_task("dashboard", **fields)
+                    rec = STORE.create_task("dashboard", **fields)
                     self._send_json({"ok": True, "record": rec}, 201)
                     return
 
@@ -835,12 +1027,12 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.complete_task("dashboard", rid)
+                    rec = STORE.complete_task("dashboard", rid)
                 elif self.path == "/api/commitments/complete":
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.complete_commitment("dashboard", rid)
+                    rec = STORE.complete_commitment("dashboard", rid)
                 else:
                     self._send_json({"error": "not found"}, 404)
                     return
@@ -854,23 +1046,23 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    cc.init()
+    STORE.init()
     # Duplicate-instance guard: if something already holds our loopback
     # port, this is a second launch. Exit cleanly (0) rather than crash,
     # so Task Scheduler restart logic and manual double-starts stay tidy
     # and never disturb the healthy running instance.
     try:
         _probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         _probe.bind((HOST, PORT))
         _probe.close()
     except OSError:
-        print("Another dashboard already listening on %s:%d — exiting." % (HOST, PORT),
-              flush=True)
+        print("Another dashboard already listening on %s:%d — exiting." % (HOST, PORT), flush=True)
         return 0
-    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    srv = ReusableHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     print("Command Centre dashboard: http://%s:%d  (localhost only)" % (HOST, PORT))
-    print("Data home: %s" % cc.get_home())
+    print("Data home: %s" % STORE.home)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

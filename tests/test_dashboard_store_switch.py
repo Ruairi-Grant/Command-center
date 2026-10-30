@@ -1,7 +1,7 @@
-"""Real-server regression coverage for the runtime PROD/DEV store switch."""
+"""Real-server regression coverage for fixed per-process storage selection."""
+
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -9,6 +9,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LIB = HERE.parent / "lib"
@@ -23,9 +24,11 @@ def request(path, method="GET", payload=None):
     req = urllib.request.Request(BASE + path, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, json.loads(resp.read().decode())
+            body = resp.read().decode()
+            return resp.status, json.loads(body) if body else None
     except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode())
+        body = exc.read().decode()
+        return exc.code, json.loads(body) if body else None
 
 
 def wait_up():
@@ -45,54 +48,53 @@ def records(home):
     path = Path(home) / "data" / "tasks.jsonl"
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
-def start(prod):
-    env = dict(os.environ, CC_HOME=str(prod), CC_PORT=str(PORT))
-    return subprocess.Popen([PY, str(LIB / "cc_dashboard.py")], env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+def start(home):
+    env = dict(os.environ, CC_ENV="test", CC_DATA_DIR=str(home), CC_PORT=str(PORT))
+    return subprocess.Popen(
+        [PY, str(LIB / "cc_dashboard.py")],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
 
 
 def main():
-    root = Path(tempfile.mkdtemp(prefix="cc-switch-"))
-    prod = root / "command-center-prod"
-    dev = root / "command-center-dev"
+    root = Path(tempfile.mkdtemp(prefix="cc-fixed-store-"))
+    configured = root / "configured-store"
+    unexpected = root / "unexpected-store"
     srv = None
     try:
-        srv = start(prod)
+        srv = start(configured)
         assert wait_up(), "dashboard did not start"
-        assert request("/api/store/switch") == (200, {"store": "prod"})
+
+        status, body = request("/api/store/switch")
+        assert status == 404 and body == {"error": "not found"}
+        status, body = request("/api/store/switch", "POST", {"store": "dev"})
+        assert status == 404 and body == {"error": "not found"}
+        status, body = request("/api/store/switch", "POST", {"store": str(unexpected)})
+        assert status == 404 and body == {"error": "not found"}
+
+        assert request("/health/live") == (200, {"status": "ok"})
+        assert request("/health/ready") == (200, {"status": "ready"})
+
         with urllib.request.urlopen(BASE + "/", timeout=10) as page_response:
             page = page_response.read().decode()
-        assert 'id="store"' in page
-        assert "store.addEventListener('click'" in page
-        assert "JSON.stringify({store: next})" in page
+        assert 'id="store"' not in page
+        assert "/api/store/switch" not in page
 
-        st, body = request("/api/tasks/create", "POST", {"title": "PROD marker"})
-        assert st == 201 and body["record"]["title"] == "PROD marker"
-        assert [r["title"] for r in records(prod)] == ["PROD marker"]
-        assert records(dev) == []
+        status, body = request("/api/tasks/create", "POST", {"title": "fixed store"})
+        assert status == 201 and body["record"]["title"] == "fixed store"
+        assert [r["title"] for r in records(configured)] == ["fixed store"]
+        assert records(unexpected) == []
 
-        st, body = request("/api/store/switch", "POST", {"store": "dev"})
-        assert st == 200 and body == {"ok": True, "store": "dev"}
-        assert request("/api/store/switch") == (200, {"store": "dev"})
-        st, body = request("/api/tasks/create", "POST", {"title": "DEV marker"})
-        assert st == 201 and body["record"]["title"] == "DEV marker"
-        assert [r["title"] for r in records(dev)] == ["DEV marker"]
-        assert [r["title"] for r in records(prod)] == ["PROD marker"]
-
-        st, body = request("/api/store/switch", "POST", {"store": "C:/outside"})
-        assert st == 400 and "store" in body["error"]
-        assert request("/api/store/switch") == (200, {"store": "dev"})
-
-        srv.terminate()
-        srv.wait(timeout=5)
-        srv = start(prod)
-        assert wait_up(), "dashboard did not restart"
-        assert request("/api/store/switch") == (200, {"store": "prod"})
-        print("[PASS] default PROD, runtime DEV switch, selected writes, invalid names, and restart reset")
-        print("ALL STORE SWITCH TESTS PASSED")
+        print("[PASS] fixed configured store rejects switch and arbitrary-path requests")
+        print("ALL FIXED STORE TESTS PASSED")
         return 0
     finally:
         if srv is not None:

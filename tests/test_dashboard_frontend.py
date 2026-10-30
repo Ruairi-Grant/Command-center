@@ -22,6 +22,7 @@ fix is caught, and that the backend API is unaffected.
 
 Run:  python tests/test_dashboard_frontend.py
 """
+
 import json
 import os
 import re
@@ -30,8 +31,8 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(os.path.dirname(HERE), "lib")
@@ -70,13 +71,29 @@ def handler_source(html, listener_marker):
         elif c == "}":
             depth -= 1
             if started and depth == 0:
-                return html[i:k + 1]
+                return html[i : k + 1]
     raise ValueError("could not balance braces for %s" % listener_marker)
+
+
+def function_source(html, function_name):
+    marker = "function " + function_name + "("
+    i = html.index(marker)
+    brace = html.index("{", i)
+    depth = 0
+    for k in range(brace, len(html)):
+        if html[k] == "{":
+            depth += 1
+        elif html[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return html[i : k + 1]
+    raise ValueError("could not balance function %s" % function_name)
 
 
 # --------------------------------------------------------------------------
 # A tiny DOM + fetch shim
 # --------------------------------------------------------------------------
+
 
 class El:
     def __init__(self, id_=None, tag="DIV", in_form=False, dataset=None):
@@ -171,24 +188,26 @@ def build_env(html):
 
     def fetch_shim(url, opts=None):
         opts = opts or {}
-        requests.append({"url": url, "method": opts.get("method", "GET"),
-                         "body": opts.get("body")})
+        requests.append({"url": url, "method": opts.get("method", "GET"), "body": opts.get("body")})
         return Resp(True)
 
     form = El(id_="newtask", tag="FORM")
     form._submit_button = El(tag="BUTTON", in_form=True)
-    els = [form,
-           El(id_="nt-kind", in_form=True),
-           El(id_="nt-title", in_form=True),
-           El(id_="nt-due", in_form=True),
-           El(id_="nt-status", in_form=True),
-           El(id_="nt-parent", in_form=True),
-           El(id_="nt-waiting", in_form=True),
-           El(id_="nt-priority", in_form=True),
-           El(id_="nt-notes", in_form=True),
-           El(id_="app", tag="MAIN"),
-           El(id_="list"),
-           El(id_="toast")]
+    els = [
+        form,
+        El(id_="nt-kind", in_form=True),
+        El(id_="nt-title", in_form=True),
+        El(id_="nt-due", in_form=True),
+        El(id_="nt-follow-up", in_form=True),
+        El(id_="nt-status", in_form=True),
+        El(id_="nt-parent", in_form=True),
+        El(id_="nt-waiting", in_form=True),
+        El(id_="nt-priority", in_form=True),
+        El(id_="nt-notes", in_form=True),
+        El(id_="app", tag="MAIN"),
+        El(id_="list"),
+        El(id_="toast"),
+    ]
     doc = Doc(els)
     done_btn = El(tag="BUTTON", dataset={"id": "task123"})
 
@@ -205,6 +224,7 @@ def build_env(html):
             "kind": doc.getElementById("nt-kind").value,
             "title": doc.getElementById("nt-title").value.strip(),
             "due": doc.getElementById("nt-due").value or None,
+            "follow_up_on": doc.getElementById("nt-follow-up").value or None,
             "status": doc.getElementById("nt-status").value,
             "parent_id": doc.getElementById("nt-parent").value or None,
             "waiting_on": doc.getElementById("nt-waiting").value.strip() or None,
@@ -230,20 +250,32 @@ def build_env(html):
     form.addEventListener("submit", on_submit)
     app_el = doc.getElementById("app")
     app_el.addEventListener("click", on_click)
+
     # In the real page, Done buttons live in #list inside #app, so their
     # clicks bubble to the delegated handler on #app. We model that by
     # dispatching the click on #app with the button as the target.
     def bubble_click(btn):
         app_el._dispatch_with_target("click", btn)
+
     return requests, doc, form, app_el, done_btn, submit_src, click_src
 
 
 def main():
     home = tempfile.mkdtemp(prefix="cc-fe3-")
-    env = dict(os.environ, CC_HOME=home, CC_PORT=str(PORT))
-    srv = subprocess.Popen([PY, os.path.join(LIB, "cc_dashboard.py")],
-                           env=env, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, text=True)
+    env = dict(
+        os.environ,
+        CC_HOME=home,
+        CC_DATA_DIR=home,
+        CC_BACKUP_DIR=os.path.join(home, "backups"),
+        CC_PORT=str(PORT),
+    )
+    srv = subprocess.Popen(
+        [PY, os.path.join(LIB, "cc_dashboard.py")],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     results = []
     try:
         assert wait_up("http://127.0.0.1:%d/" % PORT), "server did not start"
@@ -271,9 +303,11 @@ def main():
             if not (r["url"].endswith("/api/organisation/create") and r["method"] == "POST"):
                 return False
             b = json.loads(r["body"])
-            return (b.get("kind") == "task"
-                    and b.get("title") == "TEST - frontend wiring"
-                    and b.get("status") == "active")
+            return (
+                b.get("kind") == "task"
+                and b.get("title") == "TEST - frontend wiring"
+                and b.get("status") == "active"
+            )
 
         check("unified form submit -> one POST /api/organisation/create with typed item", c1)
 
@@ -293,7 +327,11 @@ def main():
             doc.getElementById("nt-notes").value = "note"
             form.submit()
             b = json.loads(reqs[0]["body"])
-            return b.get("due") == "2026-11-01" and b.get("status") == "active" and b.get("notes") == "note"
+            return (
+                b.get("due") == "2026-11-01"
+                and b.get("status") == "active"
+                and b.get("notes") == "note"
+            )
 
         check("optional due/status/notes sent when supplied", c3)
 
@@ -309,36 +347,60 @@ def main():
 
         check("empty due/notes omitted from payload", c3b)
 
+        def c3c():
+            reqs, doc, form, app, done, s, c = build_env(html)
+            doc.getElementById("nt-title").value = "waiting task"
+            doc.getElementById("nt-status").value = "waiting"
+            doc.getElementById("nt-waiting").value = "CPR clinic"
+            doc.getElementById("nt-follow-up").value = "2026-11-15"
+            form.submit()
+            b = json.loads(reqs[0]["body"])
+            return (
+                b.get("status") == "waiting"
+                and b.get("waiting_on") == "CPR clinic"
+                and b.get("follow_up_on") == "2026-11-15"
+            )
+
+        check("waiting form sends dependency and follow-up date", c3c)
+
         def c4():
             reqs, doc, form, app, done, s, c = build_env(html)
-            app._dispatch_with_target("click", done)   # bubbles to #app
+            app._dispatch_with_target("click", done)  # bubbles to #app
             if len(reqs) != 1:
                 return False
             r = reqs[0]
-            return r["url"].endswith("/api/tasks/complete") and json.loads(r["body"]).get("id") == "task123"
+            return (
+                r["url"].endswith("/api/tasks/complete")
+                and json.loads(r["body"]).get("id") == "task123"
+            )
 
         check("Done-button click still posts to /api/tasks/complete", c4)
 
         def c5():
             reqs, doc, form, app, done, s, c = build_env(html)
-            form._submit_button._dispatch("click")   # bubbles up to #app
+            form._submit_button._dispatch("click")  # bubbles up to #app
             return not any("complete" in r["url"] for r in reqs)
 
         check("click on form controls does NOT fire completion (reported bug)", c5)
 
         def c6():
             reqs, doc, form, app, done, s, c = build_env(html)
-            return ("form.contains(ev.target)" in c
-                    and "stopPropagation" in s
-                    and "button[data-id]" in c)
+            return (
+                "form.contains(ev.target)" in c
+                and "stopPropagation" in s
+                and "button[data-id]" in c
+            )
 
         check("shipped handler source contains form guard + stopPropagation", c6)
 
         def c7():
             data = json.dumps({"title": "API direct check"}).encode()
-            req = urllib.request.Request(base + "/api/tasks/create", data=data,
-                                         headers={"Content-Type": "application/json"},
-                                         method="POST")
+            req = urllib.request.Request(
+                base + "/api/tasks/create",
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
             with urllib.request.urlopen(req, timeout=10) as r:
                 j = json.loads(r.read().decode())
             return r.status == 201 and j["record"]["status"] == "active"
@@ -346,63 +408,141 @@ def main():
         check("backend /api/tasks/create still returns 201 active", c7)
 
         def c9():
-            return ("id=\"nt-kind\"" in html
-                    and "Area" in html and "Project" in html and "Task" in html
-                    and "/api/organisation/create" in html
-                    and "toLocaleString" in html
-                    and "new Date(s.generated_at)" in html
-                    and ".slice(11,16)" not in html
-                    and "data-ui-version" in html
-                    and "__UI_VERSION__" not in html
-                    and "UI v" in html
-                    and "id=\"org-editor\"" not in html
-                    and "startUnifiedEdit" in html
-                    and "'/api/organisation/update'" in html)
+            return (
+                'id="nt-kind"' in html
+                and "Area" in html
+                and "Project" in html
+                and "Task" in html
+                and "/api/organisation/create" in html
+                and "toLocaleString" in html
+                and "new Date(s.generated_at)" in html
+                and ".slice(11,16)" not in html
+                and "data-ui-version" in html
+                and "__UI_VERSION__" not in html
+                and "UI v" in html
+                and 'id="org-editor"' not in html
+                and "startUnifiedEdit" in html
+                and "'/api/organisation/update'" in html
+            )
 
-        check("header exposes UI version and local refresh time; top form supports all item types", c9)
+        check(
+            "header exposes UI version and local refresh time; top form supports all item types", c9
+        )
+
+        def c9b():
+            return (
+                'id="nt-follow-up"' in html
+                and "follow_up_on" in html
+                and "ntFollowUpWrap.hidden" in html
+                and "data-org-wait" in html
+                and "data-org-resume" in html
+                and "waitingSection" in html
+                and "waitingTaskLi" in html
+            )
+
+        check("waiting workflow exposes conditional follow-up and resume controls", c9b)
+
+        def c9c():
+            sync_src = function_source(html, "syncNewItemFields")
+            script = (
+                r"""
+class Select {
+  constructor() { this._value = ''; this._options = []; }
+  get value() { return this._value; }
+  set value(v) { this._value = String(v); }
+  set innerHTML(v) {
+    this._options = [...v.matchAll(/value="([^"]+)"/g)].map(m => m[1]);
+    this._value = this._options[0] || '';
+  }
+}
+const ntKind = {value: 'task'};
+const ntKindStatus = new Select();
+const ntDueWrap = {hidden: false};
+const ntFollowUpWrap = {hidden: false};
+const ntStatusWrap = {hidden: false};
+const ntWaitingWrap = {hidden: false};
+"""
+                + sync_src
+                + r"""
+for (const [kind, statuses] of Object.entries({
+  task: ['active', 'waiting', 'done', 'cancelled'],
+  project: ['active', 'done', 'cancelled'],
+})) {
+  ntKind.value = kind;
+  for (const status of statuses) {
+    ntKindStatus.value = status;
+    syncNewItemFields();
+    if (ntKindStatus.value !== status) throw new Error(kind + ':' + status + ' was reset');
+  }
+}
+console.log('status options preserved');
+"""
+            )
+            result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+            return result.returncode == 0 and "status options preserved" in result.stdout
+
+        check("edit status dropdown preserves every valid option", c9c)
 
         def c10():
-            return ("window.scrollY" in html
-                    and "window.scrollTo(0, scrollY)" in html
-                    and "details[data-org-id][open]" in html
-                    and "data-org-id=\"" in html
-                    and "expandedIds" in html
-                    and "renderOrganisation(currentOrganisation, expandedIds)" in html)
+            return (
+                "window.scrollY" in html
+                and "window.scrollTo(0, scrollY)" in html
+                and "details[data-org-id][open]" in html
+                and 'data-org-id="' in html
+                and "expandedIds" in html
+                and "renderOrganisation(currentOrganisation, expandedIds)" in html
+            )
 
-        check("background refresh preserves scroll position and collapsed organisation sections", c10)
+        check(
+            "background refresh preserves scroll position and collapsed organisation sections", c10
+        )
 
         def c11():
-            return ("id=\"nt-clear-due\"" in html
-                    and "ntDue.value = ''" in html
-                    and "ntClearDue.addEventListener('click'" in html)
+            return (
+                'id="nt-clear-due"' in html
+                and "ntDue.value = ''" in html
+                and "ntClearDue.addEventListener('click'" in html
+            )
 
         check("unified form can clear a selected due date", c11)
 
         def c12():
-            return ("data-org-complete" in html
-                    and "window.confirm('Complete this task?')" not in html
-                    and ">Done</button>" in html
-                    and "'/api/tasks/restore'" in html
-                    and "'/api/tasks/complete'" in html
-                    and "startUnifiedEdit" in html)
+            return (
+                "data-org-complete" in html
+                and "window.confirm('Complete this task?')" not in html
+                and ">Done</button>" in html
+                and "'/api/tasks/restore'" in html
+                and "'/api/tasks/complete'" in html
+                and "startUnifiedEdit" in html
+            )
 
-        check("organisation completion is direct, visible, and undo-capable without confirmation", c12)
+        check(
+            "organisation completion is direct, visible, and undo-capable without confirmation", c12
+        )
 
         def c13():
-            return (".toast.show { opacity: 1; pointer-events: auto; }" in html
-                    and "button[data-undo-id]" in html)
+            return (
+                ".toast.show { opacity: 1; pointer-events: auto; }" in html
+                and "button[data-undo-id]" in html
+            )
 
         check("Undo toast accepts pointer input", c13)
 
         def c14():
-            return ("const completionUndo = editing && payload.status === 'done'" in html
-                    and "say(editing ? (completionUndo ? 'Marked done'" in html)
+            return (
+                "const completionUndo = editing && payload.status === 'done'" in html
+                and "say(editing ? (completionUndo ? 'Marked done'" in html
+            )
 
         check("editing an item to Done also exposes Undo", c14)
 
         def c8():
-            p = subprocess.run([PY, os.path.join(HERE, "test_dashboard.py")],
-                               capture_output=True, text=True, timeout=180)
+            p = subprocess.run(
+                [PY, os.path.join(HERE, "test_dashboard.py")],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
             return p.returncode == 0 and "ALL DASHBOARD TESTS PASSED" in p.stdout
 
         check("existing API test suite (test_dashboard.py) still passes", c8)

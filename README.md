@@ -11,10 +11,8 @@ JSONL files you can read and edit with any text editor.
 ## Architecture
 
 ```
- Phone (browser, on the tailnet)
-    |  https://desktop-s7i2r4o.tail7d2d07.ts.net
-    v
- Tailscale Serve  (tailnet-only reverse proxy, terminates TLS)
+ The optional remote endpoint is deployment-specific and must be supplied through
+configuration; no personal hostname or address is part of the source tree.
     |  proxies over loopback
     v
  Dashboard  lib/cc_dashboard.py   -- binds 127.0.0.1:8787 ONLY
@@ -37,11 +35,13 @@ Two independent components share one write layer:
   activity log.
 - `lib/cc_dashboard.py` — a standalone stdlib HTTP server. It never
   touches the data files directly; it calls `cc_store`. It exposes only a
-  handful of explicit operations (no shell, no arbitrary file access),
-  including the runtime-only PROD/DEV store switch.
+  handful of explicit operations (no shell, no arbitrary file access). Its
+  storage dependency is fixed when the process starts; it does not expose a
+  runtime PROD/DEV switch or accept storage paths over HTTP.
 - `tests/test_cc.py`, `test_backups.py`, `test_dashboard.py`,
   `test_dashboard_frontend.py`, and `test_dashboard_store_switch.py` cover
-  the store, dashboard, frontend wiring, and isolated store switching.
+  the store, dashboard, frontend wiring, fixed-store isolation, and health
+  endpoints.
 
 The Hermes `command-centre` skill (installed separately) drives the same
 `cc_store` layer from chat, so capturing a task in conversation and
@@ -77,27 +77,19 @@ python lib/cc_dashboard.py
 The dashboard always binds to `127.0.0.1` — it is never exposed on the
 network by itself.
 
-From your phone (optional, via Tailscale):
+Remote access is deployment-specific. Configure an exact trusted hostname with
+`CC_ALLOWED_HOSTS` and, when using Tailscale Serve identity verification,
+configure `CC_EXPECTED_TS_LOGIN` and `CC_REQUIRE_TS_IDENTITY=true`.
 
-- Tailscale Serve is configured to proxy
-  `https://desktop-s7i2r4o.tail7d2d07.ts.net` (tailnet only) to
-  `http://127.0.0.1:8787`.
-- Open that URL in your phone's browser while connected to the tailnet.
-- **Turn OFF "Private DNS" on the phone** (Android: Settings → Network &
-  internet → Private DNS → Off). Android's DNS-over-TLS hijacks name
-  resolution and breaks the MagicDNS hostname lookup, so the page will
-  hang and fail with "cannot be reached" if Private DNS is on. With it
-  off, the hostname resolves through the tailnet and the page loads.
-  (If you ever re-enable it, `https://100.104.50.68` — the PC's tailnet
-  IP — still works as a fallback.)
+Do not place real hostnames, identities, addresses or credentials in the
+repository. The dashboard remains loopback-only unless a separately approved
+private transport is configured.
 
-The dashboard supports a runtime-only data-store switch. The launcher
-sets `CC_HOME` to the contained `command-center-prod` directory by default;
-the page header shows `STORE: PROD` or `STORE: DEV` and the button switches
-between the contained `command-center-prod` and `command-center-dev` stores. The selection is
-held only in the running process and resets to PROD after a restart. All
-writes continue through `cc_store`; arbitrary filesystem paths are never
-accepted.
+The dashboard uses the explicitly configured `CC_DATA_DIR` and
+`CC_BACKUP_DIR` locations for the process lifetime. Development and CI should
+supply temporary or synthetic external directories; production must supply both
+locations explicitly. The HTTP API has no store-switch endpoint and never
+accepts an arbitrary storage path.
 
 ## Using the store from the command line
 
@@ -148,13 +140,9 @@ python tests/test_organisation_edit.py    # create/update organisation records
 - The dashboard has no application login. It is safe because it binds to
   `127.0.0.1` only and is reachable remotely solely through Tailscale
   Serve, which is tailnet-only.
-- Remote requests arriving through Serve must carry the intended Tailscale
-  identity: the dashboard checks `X-Forwarded-Proto`/`X-Forwarded-Host`
-  for Serve provenance and requires `Tailscale-User-Login` to match the
-  expected account, else 403. This was verified empirically against the
-  installed Tailscale: Serve strips client-supplied identity/forwarded
-  headers, so a remote caller cannot forge a different identity through
-  Serve.
+- Remote requests arriving through a separately configured private transport must
+  carry the intended identity. The exact trusted hostname and expected identity
+  are supplied through configuration, never embedded in source.
 - Access is additionally restricted at the network layer by the Tailscale
   policy (tailnet ACL limits which device may reach the PC on tcp:443),
   independent of the application check.

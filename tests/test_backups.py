@@ -13,13 +13,13 @@ Covers:
 
 Run:  python tests/test_backups.py
 """
+
 import json
 import os
 import shutil
 import sys
 import tempfile
 import time
-import datetime as dt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIB = os.path.join(os.path.dirname(HERE), "lib")
@@ -33,6 +33,8 @@ def fresh_home():
     home = tempfile.mkdtemp(prefix="cc-bak-")
     cc.DEFAULT_HOME = home
     os.environ["CC_HOME"] = home
+    os.environ["CC_DATA_DIR"] = home
+    os.environ["CC_BACKUP_DIR"] = os.path.join(home, "backups")
     cc.init(home)
     return home
 
@@ -43,6 +45,7 @@ def _sleep_to_next_second():
     whole second so each mutation produces a distinct snapshot (a property
     of the EXISTING naming scheme, which we are not changing)."""
     import time
+
     # Sleep just over 1 second from a freshly-read wall clock; using the
     # current fractional second alone can under-shoot the boundary.
     time.sleep(1.2)
@@ -92,7 +95,9 @@ def main():
             assert len(rep["removed"]) == 4, rep
             remaining = snap_names(home)
             assert len(remaining) == 3, remaining
-            assert remaining == ["20260105T120000Z", "20260106T120000Z", "20260107T120000Z"], remaining
+            assert remaining == ["20260105T120000Z", "20260106T120000Z", "20260107T120000Z"], (
+                remaining
+            )
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -144,17 +149,25 @@ def main():
         try:
             cc.create_task("test", title="alpha", priority="high")
             _sleep_to_next_second()
-            cc.create_task("test", title="beta")   # distinct snapshot, pre-state has only alpha
+            cc.create_task("test", title="beta")  # distinct snapshot, pre-state has only alpha
             snaps = cc.list_snapshots(home)
             snap = snaps[-1][1]
-            expected = {k: cc._load_file(os.path.join(snap, k + ".jsonl"))
-                        for k in cc.KINDS}
-            cc.prune_backups(home, keep=1)   # keep the retained snapshot
+            expected = {k: cc._load_file(os.path.join(snap, k + ".jsonl")) for k in cc.KINDS}
+            cc.prune_backups(home, keep=1)  # keep the retained snapshot
             # restore
             import subprocess
-            p = subprocess.run([PY, os.path.join(LIB, "cc_store.py"), "restore",
-                                "--from", snap, "--yes"],
-                               capture_output=True, text=True, env=dict(os.environ, CC_HOME=home))
+
+            p = subprocess.run(
+                [PY, os.path.join(LIB, "cc_store.py"), "restore", "--from", snap, "--yes"],
+                capture_output=True,
+                text=True,
+                env=dict(
+                    os.environ,
+                    CC_HOME=home,
+                    CC_DATA_DIR=home,
+                    CC_BACKUP_DIR=os.path.join(home, "backups"),
+                ),
+            )
             assert p.returncode == 0, p.stderr
             for k in cc.KINDS:
                 got = cc._load_file(cc.data_file(k, home))
@@ -170,7 +183,7 @@ def main():
         try:
             t = cc.create_task("test", title="keep me")
             _sleep_to_next_second()
-            cc.create_task("test", title="anchor")   # snapshot holds pre-state: only "keep me"
+            cc.create_task("test", title="anchor")  # snapshot holds pre-state: only "keep me"
             snaps = cc.list_snapshots(home)
             snap = snaps[-1][1]
             snapshot_titles = [r["title"] for r in cc._load_file(os.path.join(snap, "tasks.jsonl"))]
@@ -182,14 +195,24 @@ def main():
             assert cc._find(cc.load_kind("tasks"), t["id"])["status"] == "done"
             # restore -> should revert both changes
             import subprocess
-            p = subprocess.run([PY, os.path.join(LIB, "cc_store.py"), "restore",
-                                "--from", snap, "--yes"],
-                               capture_output=True, text=True, env=dict(os.environ, CC_HOME=home))
+
+            p = subprocess.run(
+                [PY, os.path.join(LIB, "cc_store.py"), "restore", "--from", snap, "--yes"],
+                capture_output=True,
+                text=True,
+                env=dict(
+                    os.environ,
+                    CC_HOME=home,
+                    CC_DATA_DIR=home,
+                    CC_BACKUP_DIR=os.path.join(home, "backups"),
+                ),
+            )
             assert p.returncode == 0, p.stderr
             titles = [r["title"] for r in cc.load_kind("tasks")]
             assert titles == snapshot_titles, (titles, snapshot_titles)
-            assert cc._find(cc.load_kind("tasks"), t["id"])["status"] != "done", \
+            assert cc._find(cc.load_kind("tasks"), t["id"])["status"] != "done", (
                 "restore did not revert the mutation"
+            )
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -202,7 +225,7 @@ def main():
             for i in range(4):
                 make_fake_snapshot(home, "2026030%dT120000Z" % (i + 1))
             # corrupt the NEWEST snapshot
-            bad = make_fake_snapshot(home, "20260309T120000Z", bad=True)
+            make_fake_snapshot(home, "20260309T120000Z", bad=True)
             rep = cc.prune_backups(home, keep=1)
             assert rep["errors"], "expected an error when newest is unverifiable"
             assert rep["removed"] == [], "must not prune when verification fails"
@@ -249,8 +272,9 @@ def main():
                 # If snapshot creation raises out of mutation(), the data
                 # write is rolled back and the record must NOT exist.
                 recs = cc.load_kind("tasks")
-                assert "during failure" not in [r["title"] for r in recs], \
+                assert "during failure" not in [r["title"] for r in recs], (
                     "record persisted despite backup failure"
+                )
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -266,8 +290,9 @@ def main():
             cc.prune_backups(home, keep=2)
             for k in cc.KINDS:
                 assert os.path.exists(cc.data_file(k, home)), "%s deleted!" % k
-                assert cc._load_file(cc.data_file(k, home)) == data_before[k], \
+                assert cc._load_file(cc.data_file(k, home)) == data_before[k], (
                     "%s modified by pruning" % k
+                )
             # activity log intact and still growing
             assert os.path.exists(cc.data_file("activity", home))
             cc.create_task("test", title="after prune")
@@ -276,8 +301,9 @@ def main():
             # non-snapshot entries under backups/ are left alone
             os.makedirs(os.path.join(cc.backup_dir(home), "keepme"), exist_ok=True)
             cc.prune_backups(home, keep=1)
-            assert os.path.isdir(os.path.join(cc.backup_dir(home), "keepme")), \
+            assert os.path.isdir(os.path.join(cc.backup_dir(home), "keepme")), (
                 "non-snapshot entry under backups/ was pruned"
+            )
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -317,11 +343,15 @@ def main():
             names = [n for n, _ in snaps]
             assert len(set(names)) == 3, names
             # each snapshot holds the correct pre-mutation state
-            contents = [[r["title"] for r in cc._load_file(os.path.join(p, "tasks.jsonl"))]
-                        for _, p in snaps]
+            contents = [
+                [r["title"] for r in cc._load_file(os.path.join(p, "tasks.jsonl"))]
+                for _, p in snaps
+            ]
             assert contents == [[], ["s1"], ["s1", "s2"]], contents
             # suffixed names sort chronologically (base, -2, -3)
-            assert names[0].endswith("Z") and names[1].endswith("-2") and names[2].endswith("-3"), names
+            assert names[0].endswith("Z") and names[1].endswith("-2") and names[2].endswith("-3"), (
+                names
+            )
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -331,15 +361,17 @@ def main():
     def t10():
         home = fresh_home()
         try:
-            bdir = cc.backup_dir(home)
+            cc.backup_dir(home)
             for stamp in ("20260101T000000Z", "20260101T000000Z-10", "20260101T000000Z-2"):
                 make_fake_snapshot(home, stamp)
             names = [n for n, _ in cc.list_snapshots(home)]
             assert names == ["20260101T000000Z", "20260101T000000Z-2", "20260101T000000Z-10"], names
             # retention treats suffixed dirs as eligible snapshots
             rep = cc.prune_backups(home, keep=2)
-            assert [n for n, _ in cc.list_snapshots(home)] == \
-                ["20260101T000000Z-2", "20260101T000000Z-10"], rep
+            assert [n for n, _ in cc.list_snapshots(home)] == [
+                "20260101T000000Z-2",
+                "20260101T000000Z-10",
+            ], rep
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -350,6 +382,7 @@ def main():
         home = fresh_home()
         try:
             import subprocess
+
             cc.create_task("test", title="valid one")
             _sleep_to_next_second()
             cc.create_task("test", title="valid two")
@@ -360,22 +393,30 @@ def main():
             # corrupt the SECOND record in the snapshot (first stays valid,
             # so the old first-record-only check would have passed)
             tf = os.path.join(snap, "tasks.jsonl")
-            recs = [json.loads(l) for l in open(tf, encoding="utf-8") if l.strip()]
+            recs = [json.loads(line) for line in open(tf, encoding="utf-8") if line.strip()]
             assert len(recs) == 1, "snapshot should hold pre-mutation state only: %r" % recs
             # append a second, schema-invalid record
             bad_rec = dict(recs[0])
             bad_rec["status"] = "not-a-real-status"
             with open(tf, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(bad_rec) + "\n")
-            p = subprocess.run([PY, os.path.join(LIB, "cc_store.py"), "restore",
-                                "--from", snap, "--yes"],
-                               capture_output=True, text=True,
-                               env=dict(os.environ, CC_HOME=home))
+            p = subprocess.run(
+                [PY, os.path.join(LIB, "cc_store.py"), "restore", "--from", snap, "--yes"],
+                capture_output=True,
+                text=True,
+                env=dict(
+                    os.environ,
+                    CC_HOME=home,
+                    CC_DATA_DIR=home,
+                    CC_BACKUP_DIR=os.path.join(home, "backups"),
+                ),
+            )
             assert p.returncode != 0, "restore of an invalid snapshot succeeded"
             assert "invalid" in p.stderr.lower(), p.stderr
             # live data completely unchanged
-            assert [r["title"] for r in cc.load_kind("tasks")] == live_before, \
+            assert [r["title"] for r in cc.load_kind("tasks")] == live_before, (
                 "live data changed despite rejected restore"
+            )
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
@@ -426,6 +467,7 @@ def main():
         home = fresh_home()
         try:
             import threading
+
             errors = []
 
             def worker(k):
@@ -440,8 +482,10 @@ def main():
                 cc.create_task("seed", title="s%d" % i)
 
             threads = [threading.Thread(target=worker, args=(k,)) for k in range(6)]
-            for t in threads: t.start()
-            for t in threads: t.join()
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
             assert not errors, "concurrent mutations raised: %r" % errors[:3]
             # all writes landed
             assert len(cc.load_kind("tasks")) == 70, len(cc.load_kind("tasks"))
@@ -464,10 +508,12 @@ def main():
             # unreadable -> reason starts with 'unreadable'
             # (simulate by monkeypatching _load_file to raise PermissionError)
             real = cc._load_file
+
             def boom(path, retries=0):
                 if path.endswith("tasks.jsonl") and "backups" in path:
                     raise PermissionError(13, "simulated lock")
                 return real(path, retries=retries)
+
             cc._load_file = boom
             try:
                 ok2, why2 = cc.verify_snapshot(snap)
@@ -497,6 +543,7 @@ def main():
         home = fresh_home()
         try:
             import threading
+
             # seed enough snapshots that pruning has work to do
             for i in range(5):
                 make_fake_snapshot(home, "2026060%dT120000Z" % (i + 1))
@@ -515,6 +562,7 @@ def main():
 
             cc._backup_snapshot = slow_snapshot
             try:
+
                 def publisher():
                     cc.create_task("pub", title="published under lock")
 
@@ -536,8 +584,9 @@ def main():
                 tb.start()
                 time.sleep(0.3)
                 # pruner must NOT have finished while publisher holds the lock
-                assert not prune_ran.is_set(), \
+                assert not prune_ran.is_set(), (
                     "prune completed while a snapshot was mid-publish (race!)"
+                )
                 release_publish.set()
                 tp.join(timeout=5)
                 tb.join(timeout=5)
@@ -566,6 +615,7 @@ def main():
         home = fresh_home()
         try:
             import threading
+
             cc.create_task("test", title="one")
             snaps = cc.list_snapshots(home)
             snap = snaps[-1][1]
@@ -585,6 +635,7 @@ def main():
 
             cc._load_file = slow_load
             try:
+
                 def restorer():
                     with cc.backups_lock(home):
                         cc._load_file(snap_tasks)
@@ -602,8 +653,7 @@ def main():
                 time.sleep(0.3)
                 tpr.start()
                 time.sleep(0.3)
-                assert not prune_done.is_set(), \
-                    "prune completed during a restore read (race!)"
+                assert not prune_done.is_set(), "prune completed during a restore read (race!)"
                 release_read.set()
                 tr.join(timeout=5)
                 tpr.join(timeout=5)
