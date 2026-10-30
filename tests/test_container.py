@@ -87,8 +87,9 @@ def test_container_contract():
     image_files = run(
         "run",
         "--rm",
-        tag,
+        "--entrypoint",
         "python",
+        tag,
         "-c",
         "import os; print('\\n'.join(os.path.join(root, name) for root, _, files in os.walk('/app') for name in files if name.endswith(('.jsonl', '.db', '.sqlite', '.sqlite3'))))",
     ).stdout.strip()
