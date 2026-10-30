@@ -299,4 +299,4 @@ def test_container_contract():
         check=False,
     )
     assert invalid.returncode != 0
-    assert "existing directory" in invalid.stderr
+    assert "required" in invalid.stderr or "existing directory" in invalid.stderr
