@@ -37,6 +37,8 @@ def test_status_defaults():
 
     home = tempfile.mkdtemp(prefix="cc-status-")
     os.environ["CC_HOME"] = home
+    os.environ["CC_DATA_DIR"] = home
+    os.environ["CC_BACKUP_DIR"] = os.path.join(home, "backups")
     cc.DEFAULT_HOME = home
     try:
         # 1. no status supplied -> defaults to active (and priority normal)
@@ -95,7 +97,9 @@ def test_status_defaults():
 def main():
     test_status_defaults()
     home = tempfile.mkdtemp(prefix="cc-test-")
-    env = dict(os.environ, CC_HOME=home)
+    env = dict(
+        os.environ, CC_HOME=home, CC_DATA_DIR=home, CC_BACKUP_DIR=os.path.join(home, "backups")
+    )
     print("test home:", home)
 
     # 0. init
@@ -119,6 +123,8 @@ def main():
     # 2. concurrent writers via the mutation() lock (in-process, threads)
     sys.path.insert(0, LIB)
     os.environ["CC_HOME"] = home
+    os.environ["CC_DATA_DIR"] = home
+    os.environ["CC_BACKUP_DIR"] = os.path.join(home, "backups")
     import cc_store as cc
 
     cc.DEFAULT_HOME = home

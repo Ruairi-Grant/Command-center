@@ -33,6 +33,8 @@ def fresh_home():
     home = tempfile.mkdtemp(prefix="cc-bak-")
     cc.DEFAULT_HOME = home
     os.environ["CC_HOME"] = home
+    os.environ["CC_DATA_DIR"] = home
+    os.environ["CC_BACKUP_DIR"] = os.path.join(home, "backups")
     cc.init(home)
     return home
 
@@ -159,7 +161,12 @@ def main():
                 [PY, os.path.join(LIB, "cc_store.py"), "restore", "--from", snap, "--yes"],
                 capture_output=True,
                 text=True,
-                env=dict(os.environ, CC_HOME=home),
+                env=dict(
+                    os.environ,
+                    CC_HOME=home,
+                    CC_DATA_DIR=home,
+                    CC_BACKUP_DIR=os.path.join(home, "backups"),
+                ),
             )
             assert p.returncode == 0, p.stderr
             for k in cc.KINDS:
@@ -193,7 +200,12 @@ def main():
                 [PY, os.path.join(LIB, "cc_store.py"), "restore", "--from", snap, "--yes"],
                 capture_output=True,
                 text=True,
-                env=dict(os.environ, CC_HOME=home),
+                env=dict(
+                    os.environ,
+                    CC_HOME=home,
+                    CC_DATA_DIR=home,
+                    CC_BACKUP_DIR=os.path.join(home, "backups"),
+                ),
             )
             assert p.returncode == 0, p.stderr
             titles = [r["title"] for r in cc.load_kind("tasks")]
@@ -392,7 +404,12 @@ def main():
                 [PY, os.path.join(LIB, "cc_store.py"), "restore", "--from", snap, "--yes"],
                 capture_output=True,
                 text=True,
-                env=dict(os.environ, CC_HOME=home),
+                env=dict(
+                    os.environ,
+                    CC_HOME=home,
+                    CC_DATA_DIR=home,
+                    CC_BACKUP_DIR=os.path.join(home, "backups"),
+                ),
             )
             assert p.returncode != 0, "restore of an invalid snapshot succeeded"
             assert "invalid" in p.stderr.lower(), p.stderr

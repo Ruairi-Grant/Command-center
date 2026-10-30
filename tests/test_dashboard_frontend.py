@@ -262,7 +262,13 @@ def build_env(html):
 
 def main():
     home = tempfile.mkdtemp(prefix="cc-fe3-")
-    env = dict(os.environ, CC_HOME=home, CC_PORT=str(PORT))
+    env = dict(
+        os.environ,
+        CC_HOME=home,
+        CC_DATA_DIR=home,
+        CC_BACKUP_DIR=os.path.join(home, "backups"),
+        CC_PORT=str(PORT),
+    )
     srv = subprocess.Popen(
         [PY, os.path.join(LIB, "cc_dashboard.py")],
         env=env,

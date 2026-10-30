@@ -85,6 +85,8 @@ def main():
     env = dict(
         os.environ,
         CC_HOME=home,
+        CC_DATA_DIR=home,
+        CC_BACKUP_DIR=os.path.join(home, "backups"),
         CC_PORT=str(PORT),
         CC_ALLOWED_HOSTS=TEST_MAGICDNS_HOST,
         CC_EXPECTED_TS_LOGIN=TEST_LOGIN,

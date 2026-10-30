@@ -24,8 +24,12 @@ class IsolatedStoreTestCase(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="cc-spec-")
         self.old_home = os.environ.get("CC_HOME")
+        self.old_data_dir = os.environ.get("CC_DATA_DIR")
+        self.old_backup_dir = os.environ.get("CC_BACKUP_DIR")
         self.old_default = cc.DEFAULT_HOME
         os.environ["CC_HOME"] = self.home
+        os.environ["CC_DATA_DIR"] = self.home
+        os.environ["CC_BACKUP_DIR"] = os.path.join(self.home, "backups")
         cc.DEFAULT_HOME = self.home
         cc.init(self.home)
 
@@ -35,4 +39,12 @@ class IsolatedStoreTestCase(unittest.TestCase):
             os.environ.pop("CC_HOME", None)
         else:
             os.environ["CC_HOME"] = self.old_home
+        for name, value in (
+            ("CC_DATA_DIR", self.old_data_dir),
+            ("CC_BACKUP_DIR", self.old_backup_dir),
+        ):
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         shutil.rmtree(self.home, ignore_errors=True)

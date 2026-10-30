@@ -28,7 +28,11 @@ def one_month_from_today():
 def main():
     home = tempfile.mkdtemp(prefix="cc-org-")
     old = os.environ.get("CC_HOME")
+    old_data_dir = os.environ.get("CC_DATA_DIR")
+    old_backup_dir = os.environ.get("CC_BACKUP_DIR")
     os.environ["CC_HOME"] = home
+    os.environ["CC_DATA_DIR"] = home
+    os.environ["CC_BACKUP_DIR"] = os.path.join(home, "backups")
     try:
         cc.init()
         area = cc.create_goal("test", title="UAA", kind="area")
@@ -107,6 +111,11 @@ def main():
             os.environ.pop("CC_HOME", None)
         else:
             os.environ["CC_HOME"] = old
+        for name, value in (("CC_DATA_DIR", old_data_dir), ("CC_BACKUP_DIR", old_backup_dir)):
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
         shutil.rmtree(home, ignore_errors=True)
 
 

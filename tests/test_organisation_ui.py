@@ -39,7 +39,13 @@ def find_node(nodes, node_id):
 def main():
     root = Path(tempfile.mkdtemp(prefix="cc-org-ui-"))
     prod = root / "command-center-prod"
-    env = dict(os.environ, CC_HOME=str(prod), CC_PORT=str(PORT))
+    env = dict(
+        os.environ,
+        CC_HOME=str(prod),
+        CC_DATA_DIR=str(prod),
+        CC_BACKUP_DIR=str(prod / "backups"),
+        CC_PORT=str(PORT),
+    )
     srv = subprocess.Popen(
         [PY, str(LIB / "cc_dashboard.py")],
         env=env,
