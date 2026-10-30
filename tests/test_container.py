@@ -68,9 +68,8 @@ def request(base: str, path: str, *, method: str = "GET", payload=None, origin=N
 
 def reset_mount_permissions(path: Path, image: str):
     script = (
-        "import os; "
-        "[(os.chmod(os.path.join(root, name), 0o666)) for root, _, files in os.walk('/mnt') for name in files]; "
-        "[(os.chmod(root, 0o777)) for root, dirs, _ in os.walk('/mnt') for _ in dirs]"
+        "import os, shutil; "
+        "[shutil.rmtree(os.path.join('/mnt', name), ignore_errors=True) for name in os.listdir('/mnt')]"
     )
     run(
         "run",
@@ -208,6 +207,8 @@ def test_container_contract():
             assert list(data.glob("*.jsonl")), "container did not write synthetic data"
 
             run("restart", name)
+            port = run("port", name, "8787/tcp").stdout.strip().rsplit(":", 1)[1]
+            base = f"http://127.0.0.1:{port}"
             try:
                 wait_for(base + "/health/ready")
             except AssertionError as exc:
