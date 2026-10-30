@@ -31,21 +31,24 @@ record shapes) is deliberately kept so a SQLite backend can replace
 the file layer later without touching callers.
 """
 
+import contextlib
+import datetime as dt
 import json
 import os
 import re
 import shutil
 import sys
 import tempfile
-import datetime as dt
-import contextlib
 import time
+from typing import Any
 
+msvcrt: Any
 try:
     import msvcrt  # Windows file locking
 except ImportError:  # pragma: no cover - non-Windows fallback
     msvcrt = None
 
+fcntl: Any
 try:
     import fcntl  # POSIX file locking
 except ImportError:  # pragma: no cover
@@ -80,54 +83,13 @@ def iso_now():
 
 # ---------------------------------------------------------------- paths
 
-# Runtime store override, set via the dashboard's store-switch endpoint.
-# Deliberately NOT persisted: a reboot returns to CC_HOME (prod), so you
-# can never accidentally leave the live dashboard pointing at dev. Only
-# the exact names "prod" and "dev" are accepted; the override resolves to
-# a sibling directory, never an arbitrary path.
-STORE_OVERRIDE = {"home": None}
-STORE_NAMES = ("prod", "dev")
-
 
 def _configured_home():
     configured = os.environ.get("CC_DATA_DIR") or os.environ.get("CC_HOME")
     return configured or os.path.join(DEFAULT_HOME, "command-center-prod")
 
 
-def _named_store_home(name):
-    """Resolve a named sibling store from the configured PROD home."""
-    configured = os.path.normpath(_configured_home())
-    parent = os.path.dirname(configured)
-    return os.path.join(parent, "command-center-%s" % name)
-
-
-def set_store(name):
-    """Set the runtime store ('prod'/'dev') or None to revert to CC_HOME."""
-    if name is None:
-        STORE_OVERRIDE["home"] = None
-        return _configured_home()
-    if name not in STORE_NAMES:
-        raise ValueError("store must be one of %s" % (STORE_NAMES,))
-    home = _named_store_home(name)
-    STORE_OVERRIDE["home"] = home
-    return home
-
-
-def current_store_name():
-    """Return the active store's exact public name."""
-    home = STORE_OVERRIDE.get("home") or _configured_home()
-    base = os.path.basename(os.path.normpath(home))
-    if base.endswith("-prod"):
-        return "prod"
-    if base.endswith("-dev"):
-        return "dev"
-    return "prod" if home == _named_store_home("prod") else "custom"
-
-
 def get_home():
-    override = STORE_OVERRIDE.get("home")
-    if override:
-        return override
     return os.environ.get("CC_DATA_DIR") or os.environ.get("CC_HOME") or DEFAULT_HOME
 
 
@@ -136,7 +98,7 @@ def data_dir(home=None):
 
 
 def backup_dir(home=None):
-    if home is None and os.environ.get("CC_BACKUP_DIR"):
+    if os.environ.get("CC_BACKUP_DIR"):
         return os.environ["CC_BACKUP_DIR"]
     return os.path.join(home or get_home(), "backups")
 
@@ -154,6 +116,7 @@ def backup_lock_path(home=None):
 
 
 # ------------------------------------------------------------ validation
+
 
 def _require_str(rec, field, maxlen=500):
     v = rec.get(field)
@@ -307,6 +270,7 @@ VALIDATORS = {
 
 # ------------------------------------------------------------------ I/O
 
+
 def _load_file(path, retries=0):
     """Read a JSONL file tolerantly: skip blank lines, raise on bad JSON.
 
@@ -326,7 +290,7 @@ def _load_file(path, retries=0):
     while True:
         try:
             return _load_file_once(path)
-        except (PermissionError, OSError) as exc:
+        except (PermissionError, OSError):
             if attempt >= retries:
                 raise
             attempt += 1
@@ -394,7 +358,7 @@ def _backup_snapshot(home=None):
         name = base if n == 1 else "%s-%d" % (base, n)
         dest = os.path.join(bdir, name)
         try:
-            os.mkdir(dest)          # atomic claim; fails if it exists
+            os.mkdir(dest)  # atomic claim; fails if it exists
             break
         except FileExistsError:
             n += 1
@@ -413,7 +377,7 @@ def _backup_snapshot(home=None):
             os.close(fd)
             try:
                 shutil.copy2(srcf, tmp)
-                os.replace(tmp, dstf)   # atomic reveal
+                os.replace(tmp, dstf)  # atomic reveal
             except BaseException:
                 with contextlib.suppress(OSError):
                     os.unlink(tmp)
@@ -460,12 +424,14 @@ def list_snapshots(home=None):
         p = os.path.join(bdir, name)
         if os.path.isdir(p) and SNAP_RE.match(name):
             out.append((name, p))
+
     # Chronological order: primary key is the base stamp, secondary key is
     # the numeric same-second suffix (so -2 sorts before -10).
     def _key(t):
         m = SNAP_RE.match(t[0])
         suffix = int(m.group(1)[1:]) if m.group(1) else 0
         return (m.group(0).split("-")[0], suffix)
+
     out.sort(key=_key)
     return out
 
@@ -531,8 +497,8 @@ def prune_backups(home=None, keep=None):
     if not ok:
         # Refuse to prune when we cannot vouch for the new backup.
         report["errors"].append(
-            "newest snapshot %s failed verification (%s); pruning skipped"
-            % (newest_name, why))
+            "newest snapshot %s failed verification (%s); pruning skipped" % (newest_name, why)
+        )
         return report
 
     removable = snaps[:-keep] if len(snaps) > keep else []
@@ -547,8 +513,13 @@ def prune_backups(home=None, keep=None):
 
 
 def _append_activity(actor, action, target, detail, home=None):
-    line = {"ts": iso_now(), "actor": actor, "action": action,
-            "target": target, "detail": str(detail)[:200]}
+    line = {
+        "ts": iso_now(),
+        "actor": actor,
+        "action": action,
+        "target": target,
+        "detail": str(detail)[:200],
+    }
     path = os.path.join(data_dir(home or get_home()), "activity.jsonl")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
@@ -567,6 +538,7 @@ def _append_activity(actor, action, target, detail, home=None):
 # path follows this single fixed order, so a circular wait is impossible.
 # msvcrt LK_LOCK blocks (it does not fail) on contention, so waiting for
 # the backups lock can never deadlock.
+
 
 @contextlib.contextmanager
 def _file_lock(path):
@@ -614,7 +586,6 @@ def mutation(actor, action, target, home=None):
     home = home or get_home()
     os.makedirs(data_dir(home), exist_ok=True)
     os.makedirs(backup_dir(home), exist_ok=True)
-    prune_report = None
     # LOCK ORDER: backups lock FIRST, then data lock (fixed order -> no
     # deadlock). The backups lock covers snapshot publication and pruning,
     # so no other thread can delete a snapshot we are publishing/verifying.
@@ -638,10 +609,11 @@ def mutation(actor, action, target, home=None):
             # deleted mid-publish. prune_backups verifies the newest
             # snapshot and reports failures rather than raising.
             if snap:
-                prune_report = prune_backups(home)
+                prune_backups(home)
 
 
 # ------------------------------------------------------------- operations
+
 
 def _find(records, rid):
     for rec in records:
@@ -652,8 +624,11 @@ def _find(records, rid):
 
 def _unfinished_children(rid, home):
     records = load_kind("goals", home) + load_kind("tasks", home)
-    return [r for r in records if r.get("parent_id") == rid
-            and r.get("status") not in ("done", "cancelled")]
+    return [
+        r
+        for r in records
+        if r.get("parent_id") == rid and r.get("status") not in ("done", "cancelled")
+    ]
 
 
 def _validate_parent_relationship(kind, parent_id, home, moving_id=None):
@@ -694,8 +669,8 @@ def _require_parent_exists(parent_id, home):
     _validate_parent_relationship("task", parent_id, home)
 
 
-def create_task(actor, **fields):
-    home = get_home()
+def create_task(actor, *, _home=None, **fields):
+    home = _home or get_home()
     rec = validate_task(fields)
     if rec.get("status") == "waiting" and not (rec.get("waiting_on") or "").strip():
         raise CCError("waiting_on is required when status is waiting")
@@ -717,11 +692,11 @@ def create_task(actor, **fields):
     return rec
 
 
-def update_task(actor, rid, **patch):
+def update_task(actor, rid, *, _home=None, **patch):
     _check_id(rid)
     clean = validate_task(patch, partial=True)
     clean.pop("id", None)
-    home = get_home()
+    home = _home or get_home()
     if "parent_id" in clean:
         _validate_parent_relationship("task", clean["parent_id"], home, moving_id=rid)
     if "waiting_on" in clean and not (clean.get("waiting_on") or "").strip():
@@ -764,8 +739,8 @@ def update_task(actor, rid, **patch):
     return rec
 
 
-def complete_task(actor, rid):
-    home = get_home()
+def complete_task(actor, rid, *, _home=None):
+    home = _home or get_home()
     with mutation(actor, "task.complete", "task:" + rid, home):
         records = load_kind("tasks", home)
         rec = _find(records, rid)
@@ -781,8 +756,8 @@ def complete_task(actor, rid):
     return rec
 
 
-def create_goal(actor, **fields):
-    home = get_home()
+def create_goal(actor, *, _home=None, **fields):
+    home = _home or get_home()
     rec = validate_goal(fields)
     rec["id"] = new_id()
     rec["kind"] = rec.get("kind") or "goal"
@@ -806,11 +781,11 @@ def create_goal(actor, **fields):
     return rec
 
 
-def update_goal(actor, rid, **patch):
+def update_goal(actor, rid, *, _home=None, **patch):
     _check_id(rid)
     clean = validate_goal(patch, partial=True)
     clean.pop("id", None)
-    home = get_home()
+    home = _home or get_home()
     records = load_kind("goals", home)
     rec = _find(records, rid)
     if rec is None:
@@ -850,9 +825,9 @@ def update_goal(actor, rid, **patch):
     return rec
 
 
-def restore_task(actor, rid):
+def restore_task(actor, rid, *, _home=None):
     _check_id(rid)
-    home = get_home()
+    home = _home or get_home()
     with mutation(actor, "task.restore", "task:" + rid, home):
         records = load_kind("tasks", home)
         rec = _find(records, rid)
@@ -866,16 +841,17 @@ def restore_task(actor, rid):
     return rec
 
 
-def delete_organisation(actor, rid):
+def delete_organisation(actor, rid, *, _home=None):
     _check_id(rid)
-    home = get_home()
+    home = _home or get_home()
     for kind in ("goals", "tasks"):
         records = load_kind(kind, home)
         rec = _find(records, rid)
         if rec is None:
             continue
         if _unfinished_children(rid, home) or any(
-                r.get("parent_id") == rid for r in load_kind("goals", home) + load_kind("tasks", home)):
+            r.get("parent_id") == rid for r in load_kind("goals", home) + load_kind("tasks", home)
+        ):
             raise CCError("cannot delete an item with children")
         with mutation(actor, "organisation.delete", kind + ":" + rid, home):
             records = load_kind(kind, home)
@@ -883,8 +859,10 @@ def delete_organisation(actor, rid):
             _atomic_write_lines(data_file(kind, home), records)
         return {"id": rid, "deleted": True}
     raise CCError("organisation item %s not found" % rid)
-def create_commitment(actor, **fields):
-    home = get_home()
+
+
+def create_commitment(actor, *, _home=None, **fields):
+    home = _home or get_home()
     rec = validate_commitment(fields)
     rec["id"] = new_id()
     rec["done"] = False
@@ -896,9 +874,9 @@ def create_commitment(actor, **fields):
     return rec
 
 
-def complete_commitment(actor, rid):
+def complete_commitment(actor, rid, *, _home=None):
     _check_id(rid)
-    home = get_home()
+    home = _home or get_home()
     with mutation(actor, "commitment.complete", "commitment:" + rid, home):
         records = load_kind("commitments", home)
         rec = _find(records, rid)
@@ -909,50 +887,130 @@ def complete_commitment(actor, rid):
     return rec
 
 
-def create_organisation(actor, **fields):
+def create_organisation(actor, *, _home=None, **fields):
     kind = fields.get("kind")
     if kind == "area":
         if fields.get("parent_id") is not None:
             raise CCError("areas cannot have parents")
         if fields.get("status") not in (None, ""):
             raise CCError("areas do not have a status")
-        return create_goal(actor, **fields)
+        return create_goal(actor, _home=_home, **fields)
     if kind == "project":
         if fields.get("status") not in (None, "", *GOAL_STATUSES):
             raise CCError("project status is invalid")
-        return create_goal(actor, **fields)
+        return create_goal(actor, _home=_home, **fields)
     if kind == "task":
-        return create_task(actor, **fields)
+        return create_task(actor, _home=_home, **fields)
     raise CCError("field 'kind' must be one of area/project/task")
 
 
-def update_organisation(actor, rid, **patch):
+def update_organisation(actor, rid, *, _home=None, **patch):
     _check_id(rid)
-    home = get_home()
+    home = _home or get_home()
     goals = load_kind("goals", home)
     tasks = load_kind("tasks", home)
     rec = _find(goals, rid)
     if rec is not None:
-        allowed = {k: v for k, v in patch.items()
-                   if k in ("title", "status", "kind", "parent_id", "done_when", "next_action", "target", "due", "notes")}
-        return update_goal(actor, rid, **allowed)
+        allowed = {
+            k: v
+            for k, v in patch.items()
+            if k
+            in (
+                "title",
+                "status",
+                "kind",
+                "parent_id",
+                "done_when",
+                "next_action",
+                "target",
+                "due",
+                "notes",
+            )
+        }
+        return update_goal(actor, rid, _home=_home, **allowed)
     rec = _find(tasks, rid)
     if rec is not None:
-        allowed = {k: v for k, v in patch.items()
-                   if k in ("title", "status", "kind", "parent_id", "waiting_on", "follow_up_on", "done_when", "next_action", "notes", "due", "priority")}
-        return update_task(actor, rid, **allowed)
+        allowed = {
+            k: v
+            for k, v in patch.items()
+            if k
+            in (
+                "title",
+                "status",
+                "kind",
+                "parent_id",
+                "waiting_on",
+                "follow_up_on",
+                "done_when",
+                "next_action",
+                "notes",
+                "due",
+                "priority",
+            )
+        }
+        return update_task(actor, rid, _home=_home, **allowed)
     raise CCError("organisation item %s not found" % rid)
 
 
+class Store:
+    """Explicit fixed storage dependency for one dashboard process."""
+
+    def __init__(self, home):
+        if not isinstance(home, str) or not home.strip():
+            raise CCError("a non-empty data directory is required")
+        self.home = os.path.abspath(home)
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(config.data_home)
+
+    def init(self):
+        return init(self.home)
+
+    def build_state(self):
+        return build_state(self.home)
+
+    def create_task(self, actor, **fields):
+        return create_task(actor, _home=self.home, **fields)
+
+    def update_task(self, actor, rid, **patch):
+        return update_task(actor, rid, _home=self.home, **patch)
+
+    def complete_task(self, actor, rid):
+        return complete_task(actor, rid, _home=self.home)
+
+    def restore_task(self, actor, rid):
+        return restore_task(actor, rid, _home=self.home)
+
+    def create_commitment(self, actor, **fields):
+        return create_commitment(actor, _home=self.home, **fields)
+
+    def complete_commitment(self, actor, rid):
+        return complete_commitment(actor, rid, _home=self.home)
+
+    def create_organisation(self, actor, **fields):
+        return create_organisation(actor, _home=self.home, **fields)
+
+    def update_organisation(self, actor, rid, **patch):
+        return update_organisation(actor, rid, _home=self.home, **patch)
+
+    def delete_organisation(self, actor, rid):
+        return delete_organisation(actor, rid, _home=self.home)
+
+
 # ---------------------------------------------------------------- views
+
 
 def today():
     return dt.date.today()
 
 
 def open_tasks(tasks=None):
-    return [t for t in (tasks if tasks is not None else load_kind("tasks"))
-            if t.get("status") in ("active", "waiting") ]
+    return [
+        t
+        for t in (tasks if tasks is not None else load_kind("tasks"))
+        if t.get("status") in ("active", "waiting")
+    ]
 
 
 def due_on_or_before(t, day):
@@ -1006,10 +1064,14 @@ def _organisation_tree(tasks, goals):
         project_due = own_due if rec.get("kind") == "project" and own_due else inherited_project_due
         effective_due = own_due or inherited_project_due
         due_source = "explicit" if own_due else ("inherited" if inherited_project_due else None)
-        children = sorted(by_parent.get(rec.get("id"), []),
-                          key=lambda x: (x.get("status") == "done", x.get("title", "").lower()))
-        child_headers = sorted(all_by_parent.get(rec.get("id"), []),
-                               key=lambda x: (x.get("status") in ("done", "cancelled"), x.get("title", "").lower()))
+        children = sorted(
+            by_parent.get(rec.get("id"), []),
+            key=lambda x: (x.get("status") == "done", x.get("title", "").lower()),
+        )
+        child_headers = sorted(
+            all_by_parent.get(rec.get("id"), []),
+            key=lambda x: (x.get("status") in ("done", "cancelled"), x.get("title", "").lower()),
+        )
         return {
             "id": rec["id"],
             "title": rec.get("title", ""),
@@ -1027,8 +1089,12 @@ def _organisation_tree(tasks, goals):
             "waiting_since": rec.get("waiting_since"),
             "done_when": rec.get("done_when"),
             "child_headers": [
-                {"id": child["id"], "title": child.get("title", ""),
-                 "kind": child.get("kind"), "status": child.get("status")}
+                {
+                    "id": child["id"],
+                    "title": child.get("title", ""),
+                    "kind": child.get("kind"),
+                    "status": child.get("status"),
+                }
                 for child in child_headers
             ],
             "children": [node(child, project_due) for child in children],
@@ -1067,12 +1133,24 @@ def build_state(home=None):
         "waiting": waiting,
         "waiting_followups": waiting_followups,
         "today_tasks": [t for t in active if t.get("due") == day.isoformat()],
-        "overdue": [t for t in active if due_on_or_before(t, day) and t.get("due") < day.isoformat()],
-        "upcoming_tasks": [t for t in active if t.get("due") and day.isoformat() < t["due"] <= soon],
+        "overdue": [
+            t for t in active if due_on_or_before(t, day) and t.get("due") < day.isoformat()
+        ],
+        "upcoming_tasks": [
+            t for t in active if t.get("due") and day.isoformat() < t["due"] <= soon
+        ],
         "no_date_tasks": [t for t in active if not t.get("due")],
         "commitments": {
-            "overdue": [c for c in commitments if not c.get("done") and c.get("due") and c["due"] < day.isoformat()],
-            "upcoming": [c for c in commitments if not c.get("done") and c.get("due") and day.isoformat() <= c["due"] <= soon],
+            "overdue": [
+                c
+                for c in commitments
+                if not c.get("done") and c.get("due") and c["due"] < day.isoformat()
+            ],
+            "upcoming": [
+                c
+                for c in commitments
+                if not c.get("done") and c.get("due") and day.isoformat() <= c["due"] <= soon
+            ],
             "no_date": [c for c in commitments if not c.get("done") and not c.get("due")],
         },
         "goals": [g for g in goals if g.get("status") == "active"],
@@ -1081,6 +1159,7 @@ def build_state(home=None):
 
 
 # ---------------------------------------------------------------- init
+
 
 def init(home=None):
     home = home or get_home()
@@ -1097,6 +1176,7 @@ def init(home=None):
 
 
 # ------------------------------------------------------------------ CLI
+
 
 def _print_json(obj):
     print(json.dumps(obj, indent=2, ensure_ascii=False))
@@ -1213,7 +1293,8 @@ def main(argv=None):
                         except CCError as exc:
                             raise CCError(
                                 "backup has an invalid %s record at line %d: %s"
-                                % (kind, i + 1, exc))
+                                % (kind, i + 1, exc)
+                            )
                     buffered[kind] = recs
             with mutation("restore", "restore", src, home):
                 for kind in KINDS:
@@ -1224,10 +1305,11 @@ def main(argv=None):
             sub = rest[0] if rest else "list"
             if sub == "list":
                 with backups_lock():
-                    snaps = [(n, verify_snapshot(p)[0], verify_snapshot(p)[1])
-                             for n, p in list_snapshots()]
-                _print_json([{"name": n, "ok": ok, "reason": why}
-                             for n, ok, why in snaps])
+                    snaps = [
+                        (n, verify_snapshot(p)[0], verify_snapshot(p)[1])
+                        for n, p in list_snapshots()
+                    ]
+                _print_json([{"name": n, "ok": ok, "reason": why} for n, ok, why in snaps])
             elif sub == "prune":
                 keep = int(_flag(rest, "--keep", str(get_backup_keep())))
                 with backups_lock():

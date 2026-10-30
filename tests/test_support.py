@@ -3,6 +3,7 @@
 New tests use these helpers instead of touching the operational stores. The
 legacy suites remain independent while they are migrated incrementally.
 """
+
 import os
 import shutil
 import sys
@@ -26,11 +27,9 @@ class IsolatedStoreTestCase(unittest.TestCase):
         self.old_default = cc.DEFAULT_HOME
         os.environ["CC_HOME"] = self.home
         cc.DEFAULT_HOME = self.home
-        cc.STORE_OVERRIDE["home"] = None
         cc.init(self.home)
 
     def tearDown(self):
-        cc.STORE_OVERRIDE["home"] = None
         cc.DEFAULT_HOME = self.old_default
         if self.old_home is None:
             os.environ.pop("CC_HOME", None)

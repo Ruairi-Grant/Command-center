@@ -10,7 +10,7 @@ The repository currently uses Python 3.14.7 and the standard library only. `pyte
 
 Initial approach:
 
-- Preserve the existing script-based suites for storage durability, backup/recovery, API security, store switching, and current organisation regression coverage.
+- Preserve the existing script-based suites for storage durability, backup/recovery, API security, fixed-store isolation, and current organisation regression coverage.
 - Add a small standard-library test runner so the full suite has one documented command.
 - Add specification tests with stable requirement IDs in test names and comments.
 - Use isolated temporary PROD/DEV stores for every test that writes data.

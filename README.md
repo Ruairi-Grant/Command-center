@@ -35,11 +35,13 @@ Two independent components share one write layer:
   activity log.
 - `lib/cc_dashboard.py` — a standalone stdlib HTTP server. It never
   touches the data files directly; it calls `cc_store`. It exposes only a
-  handful of explicit operations (no shell, no arbitrary file access),
-  including the runtime-only PROD/DEV store switch.
+  handful of explicit operations (no shell, no arbitrary file access). Its
+  storage dependency is fixed when the process starts; it does not expose a
+  runtime PROD/DEV switch or accept storage paths over HTTP.
 - `tests/test_cc.py`, `test_backups.py`, `test_dashboard.py`,
   `test_dashboard_frontend.py`, and `test_dashboard_store_switch.py` cover
-  the store, dashboard, frontend wiring, and isolated store switching.
+  the store, dashboard, frontend wiring, fixed-store isolation, and health
+  endpoints.
 
 The Hermes `command-centre` skill (installed separately) drives the same
 `cc_store` layer from chat, so capturing a task in conversation and
@@ -83,13 +85,11 @@ Do not place real hostnames, identities, addresses or credentials in the
 repository. The dashboard remains loopback-only unless a separately approved
 private transport is configured.
 
-The dashboard supports a runtime-only data-store switch. The launcher
-sets `CC_HOME` to the contained `command-center-prod` directory by default;
-the page header shows `STORE: PROD` or `STORE: DEV` and the button switches
-between the contained `command-center-prod` and `command-center-dev` stores. The selection is
-held only in the running process and resets to PROD after a restart. All
-writes continue through `cc_store`; arbitrary filesystem paths are never
-accepted.
+The dashboard uses the explicitly configured `CC_DATA_DIR` and
+`CC_BACKUP_DIR` locations for the process lifetime. Development and CI should
+supply temporary or synthetic external directories; production must supply both
+locations explicitly. The HTTP API has no store-switch endpoint and never
+accepts an arbitrary storage path.
 
 ## Using the store from the command line
 

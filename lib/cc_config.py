@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-
 _ENVIRONMENTS = {"development", "test", "production"}
 
 
@@ -90,10 +89,25 @@ def load() -> AppConfig:
             "CC_EXPECTED_TS_LOGIN is required when Tailscale identity verification is enabled"
         )
 
+    data_home = _env("CC_DATA_DIR") or _env("CC_HOME")
+    if environment == "production" and not data_home:
+        raise ConfigError("CC_DATA_DIR is required in production")
+    if not data_home:
+        data_home = os.path.join(
+            os.path.expanduser("~"), ".local", "share", "command-centre", "dev", "data"
+        )
+    backup_home = _env("CC_BACKUP_DIR")
+    if environment == "production" and not backup_home:
+        raise ConfigError("CC_BACKUP_DIR is required in production")
+    if not backup_home:
+        backup_home = os.path.join(
+            os.path.expanduser("~"), ".local", "share", "command-centre", "dev", "backups"
+        )
+
     return AppConfig(
         environment=environment,
-        data_home=_env("CC_DATA_DIR") or _env("CC_HOME"),
-        backup_home=_env("CC_BACKUP_DIR"),
+        data_home=data_home,
+        backup_home=backup_home,
         log_file=_env("CC_LOG_FILE"),
         bind_host=bind_host,
         port=_port(),

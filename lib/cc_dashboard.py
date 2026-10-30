@@ -30,7 +30,6 @@ import json
 import os
 import socket
 import sys
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -40,6 +39,9 @@ import cc_store as cc  # noqa: E402
 UI_VERSION = "0.4.0"
 
 CONFIG = cc_config.load()
+os.environ["CC_DATA_DIR"] = CONFIG.data_home
+os.environ["CC_BACKUP_DIR"] = CONFIG.backup_home
+STORE = cc.Store.from_config(CONFIG)
 HOST = CONFIG.bind_host
 PORT = CONFIG.port
 
@@ -81,7 +83,7 @@ def _origin_ok(handler):
     """Origin policy for POST requests. Returns (ok, reason)."""
     origin = (handler.headers.get("Origin") or "").strip()
     if not origin:
-        return True, "no-origin"          # same-origin fetch / API client
+        return True, "no-origin"  # same-origin fetch / API client
     # Origin looks like scheme://host[:port]
     try:
         rest = origin.split("://", 1)[1]
@@ -116,6 +118,7 @@ def _identity_ok(handler):
     if login.lower() != EXPECTED_TS_LOGIN.lower():
         return False, "unexpected-identity"
     return True, "ok"
+
 
 PAGE = """<!doctype html>
 <html lang="en">
@@ -218,7 +221,6 @@ PAGE = """<!doctype html>
 <header data-ui-version="__UI_VERSION__">
   <h1>Command Centre <span class="ui-version">UI v__UI_VERSION__</span></h1>
   <span class="meta" id="meta">loading…</span>
-  <button class="store" id="store" type="button" title="Switch data store">STORE: loading…</button>
 </header>
 <main id="app">
   <form class="newtask" id="newtask" autocomplete="off">
@@ -308,7 +310,6 @@ const ntCancel = document.getElementById('nt-cancel');
 const orgTree = document.getElementById('organisation-tree');
 const orgAdd = document.getElementById('org-add');
 const meta = document.getElementById('meta');
-const store = document.getElementById('store');
 const toast = document.getElementById('toast');
 const orgDetail = document.getElementById('org-detail');
 const orgDetailTitle = document.getElementById('org-detail-title');
@@ -711,7 +712,6 @@ async function load() {
   orgTree.innerHTML = renderOrganisation(currentOrganisation, expandedIds);
   orgTree.dataset.rendered = '1';
   window.scrollTo(0, scrollY);
-  updateStore();
   let html = '';
   html += waitingSection(s.waiting || [], s.waiting_followups || [], s.today);
   html += section('Overdue', s.overdue, taskLi, s.today);
@@ -719,42 +719,6 @@ async function load() {
   html += section('Upcoming (7 days)', s.upcoming_tasks, taskLi, s.today);
   list.innerHTML = html;   // render into #list, never clobber the form
 }
-
-async function updateStore() {
-  try {
-    const r = await fetch('/api/store/switch');
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const j = await r.json();
-    const name = String(j.store || '').toUpperCase();
-    store.textContent = 'STORE: ' + name;
-    store.className = 'store ' + String(j.store || '').toLowerCase();
-    store.dataset.store = String(j.store || '').toLowerCase();
-  } catch (e) {
-    store.textContent = 'STORE: unavailable';
-    store.className = 'store';
-  }
-}
-
-store.addEventListener('click', async () => {
-  const current = store.dataset.store;
-  const next = current === 'dev' ? 'prod' : 'dev';
-  store.disabled = true;
-  try {
-    const r = await fetch('/api/store/switch', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({store: next}),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
-    await updateStore();
-    await load();
-    say('Switched to ' + next.toUpperCase());
-  } catch (e) {
-    say('Store switch failed: ' + e.message, true);
-  } finally {
-    store.disabled = false;
-  }
-});
 
 form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -909,8 +873,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "POST":
             ok, why = _origin_ok(self)
             if not ok:
-                _log(self, "rejected: unexpected Origin %r (%s)"
-                     % (self.headers.get("Origin"), why))
+                _log(
+                    self, "rejected: unexpected Origin %r (%s)" % (self.headers.get("Origin"), why)
+                )
                 self._send_json({"error": "forbidden"}, 403)
                 return False
         # Serve-proxied requests must also present the intended identity.
@@ -918,8 +883,11 @@ class Handler(BaseHTTPRequestHandler):
         if _is_serve_request(self):
             ok, why = _identity_ok(self)
             if not ok:
-                _log(self, "rejected: identity check failed (%s) login=%r"
-                     % (why, self.headers.get("Tailscale-User-Login")))
+                _log(
+                    self,
+                    "rejected: identity check failed (%s) login=%r"
+                    % (why, self.headers.get("Tailscale-User-Login")),
+                )
                 self._send_json({"error": "forbidden"}, 403)
                 return False
         return True
@@ -943,13 +911,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._guard():
                 return
-            if self.path in ("/", "/index.html"):
+            if self.path == "/health/live":
+                self._send_json({"status": "ok"})
+            elif self.path == "/health/ready":
+                try:
+                    STORE.build_state()
+                    self._send_json({"status": "ready"})
+                except Exception as exc:
+                    _log(self, "readiness check failed: %s" % exc)
+                    self._send_json({"status": "not_ready"}, 503)
+            elif self.path in ("/", "/index.html"):
                 self._send_html(PAGE.replace("__UI_VERSION__", UI_VERSION))
-            elif self.path == "/api/store/switch":
-                self._send_json({"store": cc.current_store_name()})
             elif self.path.startswith("/api/state"):
                 try:
-                    self._send_json(cc.build_state())
+                    self._send_json(STORE.build_state())
                 except cc.CCError as exc:
                     # M1: expected application error -> generic to client,
                     # detail logged server-side.
@@ -966,30 +941,31 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._guard():
                 return
-            if self.path == "/api/store/switch":
-                body = self._read_json()
-                if not isinstance(body, dict):
-                    self._send_json({"error": "invalid JSON body"}, 400)
-                    return
-                name = body.get("store")
-                if not isinstance(name, str) or name not in cc.STORE_NAMES:
-                    self._send_json({"error": "store must be 'prod' or 'dev'"}, 400)
-                    return
-                cc.set_store(name)
-                cc.init()
-                self._send_json({"ok": True, "store": cc.current_store_name()})
-                return
             body = self._read_json()
             if not isinstance(body, dict):
                 self._send_json({"error": "invalid JSON body"}, 400)
                 return
             try:
                 if self.path == "/api/organisation/create":
-                    fields = {k: body[k] for k in (
-                        "title", "kind", "parent_id", "status", "priority",
-                        "next_action", "done_when", "waiting_on", "follow_up_on", "notes", "due", "target"
-                    ) if k in body}
-                    rec = cc.create_organisation("dashboard", **fields)
+                    fields = {
+                        k: body[k]
+                        for k in (
+                            "title",
+                            "kind",
+                            "parent_id",
+                            "status",
+                            "priority",
+                            "next_action",
+                            "done_when",
+                            "waiting_on",
+                            "follow_up_on",
+                            "notes",
+                            "due",
+                            "target",
+                        )
+                        if k in body
+                    }
+                    rec = STORE.create_organisation("dashboard", **fields)
                     self._send_json({"ok": True, "record": rec}, 201)
                     return
                 if self.path == "/api/organisation/update":
@@ -997,11 +973,25 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    fields = {k: body[k] for k in (
-                        "title", "kind", "parent_id", "status", "priority",
-                        "next_action", "done_when", "waiting_on", "follow_up_on", "notes", "due", "target"
-                    ) if k in body}
-                    rec = cc.update_organisation("dashboard", rid, **fields)
+                    fields = {
+                        k: body[k]
+                        for k in (
+                            "title",
+                            "kind",
+                            "parent_id",
+                            "status",
+                            "priority",
+                            "next_action",
+                            "done_when",
+                            "waiting_on",
+                            "follow_up_on",
+                            "notes",
+                            "due",
+                            "target",
+                        )
+                        if k in body
+                    }
+                    rec = STORE.update_organisation("dashboard", rid, **fields)
                     self._send_json({"ok": True, "record": rec})
                     return
                 if self.path == "/api/organisation/delete":
@@ -1009,7 +999,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.delete_organisation("dashboard", rid)
+                    rec = STORE.delete_organisation("dashboard", rid)
                     self._send_json({"ok": True, "record": rec})
                     return
                 if self.path == "/api/tasks/restore":
@@ -1017,7 +1007,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.restore_task("dashboard", rid)
+                    rec = STORE.restore_task("dashboard", rid)
                     self._send_json({"ok": True, "record": rec})
                     return
                 if self.path == "/api/tasks/create":
@@ -1026,7 +1016,7 @@ class Handler(BaseHTTPRequestHandler):
                         if k in body and body[k] not in (None, ""):
                             fields[k] = body[k]
                     # new tasks always start at active unless changed later.
-                    rec = cc.create_task("dashboard", **fields)
+                    rec = STORE.create_task("dashboard", **fields)
                     self._send_json({"ok": True, "record": rec}, 201)
                     return
 
@@ -1035,12 +1025,12 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.complete_task("dashboard", rid)
+                    rec = STORE.complete_task("dashboard", rid)
                 elif self.path == "/api/commitments/complete":
                     if not isinstance(rid, str):
                         self._send_json({"error": "missing id"}, 400)
                         return
-                    rec = cc.complete_commitment("dashboard", rid)
+                    rec = STORE.complete_commitment("dashboard", rid)
                 else:
                     self._send_json({"error": "not found"}, 404)
                     return
@@ -1054,7 +1044,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    cc.init()
+    STORE.init()
     # Duplicate-instance guard: if something already holds our loopback
     # port, this is a second launch. Exit cleanly (0) rather than crash,
     # so Task Scheduler restart logic and manual double-starts stay tidy
@@ -1065,13 +1055,12 @@ def main():
         _probe.bind((HOST, PORT))
         _probe.close()
     except OSError:
-        print("Another dashboard already listening on %s:%d — exiting." % (HOST, PORT),
-              flush=True)
+        print("Another dashboard already listening on %s:%d — exiting." % (HOST, PORT), flush=True)
         return 0
     srv = ReusableHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     print("Command Centre dashboard: http://%s:%d  (localhost only)" % (HOST, PORT))
-    print("Data home: %s" % cc.get_home())
+    print("Data home: %s" % STORE.home)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
