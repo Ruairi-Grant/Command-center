@@ -1,0 +1,48 @@
+services:
+  command-centre:
+    build:
+      context: .
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        VCS_REF: ${VCS_REF:-local}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    image: command-centre:${IMAGE_TAG:-dev}
+    user: "10001:10001"
+    init: true
+    restart: unless-stopped
+    environment:
+      CC_ENV: development
+      CC_CONTAINER: "true"
+      CC_DATA_DIR: /var/lib/command-centre
+      CC_BACKUP_DIR: /var/lib/command-centre/backups
+      CC_BIND_HOST: 0.0.0.0
+      CC_PORT: "8787"
+      CC_ALLOWED_HOSTS: 127.0.0.1,localhost
+      CC_REQUIRE_TS_IDENTITY: "false"
+    ports:
+      - "127.0.0.1:${CC_PORT:-8787}:8787"
+    volumes:
+      - command-centre-dev-data:/var/lib/command-centre/data
+      - command-centre-dev-backups:/var/lib/command-centre/backups
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+
+volumes:
+  command-centre-dev-data:
+  command-centre-dev-backups:

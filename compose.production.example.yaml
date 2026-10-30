@@ -1,0 +1,45 @@
+# Production-oriented example. Copy the values into a deployment-specific
+# environment file; do not commit real paths, hostnames or identities.
+services:
+  command-centre:
+    image: "${CC_IMAGE:?Set CC_IMAGE to an immutable ghcr.io digest}"
+    user: "10001:10001"
+    init: true
+    restart: unless-stopped
+    environment:
+      CC_ENV: production
+      CC_CONTAINER: "true"
+      CC_DATA_DIR: /var/lib/command-centre
+      CC_BACKUP_DIR: /var/lib/command-centre/backups
+      CC_BIND_HOST: 0.0.0.0
+      CC_PORT: "8787"
+      CC_ALLOWED_HOSTS: "${CC_ALLOWED_HOSTS:?Set the exact private reverse-proxy hostname}"
+      CC_REQUIRE_TS_IDENTITY: "true"
+      CC_EXPECTED_TS_LOGIN: "${CC_EXPECTED_TS_LOGIN:?Set the expected Tailscale identity}"
+    ports:
+      - "127.0.0.1:${CC_PORT:-8787}:8787"
+    volumes:
+      - type: bind
+        source: "${CC_HOST_DATA_DIR:?Set the pre-created persistent data directory}"
+        target: /var/lib/command-centre/data
+      - type: bind
+        source: "${CC_HOST_BACKUP_DIR:?Set the pre-created persistent backup directory}"
+        target: /var/lib/command-centre/backups
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health/ready', timeout=2).read()"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
