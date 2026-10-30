@@ -101,6 +101,8 @@ def test_container_contract():
         backups = root / "backups"
         data.mkdir(mode=0o777)
         backups.mkdir(mode=0o777)
+        os.chmod(data, 0o777)
+        os.chmod(backups, 0o777)
         name = f"cc-integration-{os.getpid()}"
         run(
             "run",
