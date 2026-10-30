@@ -117,7 +117,7 @@ def test_container_contract():
     ).stdout.strip()
     assert image_files == ""
 
-    with tempfile.TemporaryDirectory(prefix="cc-container-") as temp:
+    with tempfile.TemporaryDirectory(prefix="cc-container-", ignore_cleanup_errors=True) as temp:
         root = Path(temp)
         data = root / "data"
         backups = root / "backups"
@@ -208,7 +208,11 @@ def test_container_contract():
             assert list(data.glob("*.jsonl")), "container did not write synthetic data"
 
             run("restart", name)
-            wait_for(base + "/health/ready")
+            try:
+                wait_for(base + "/health/ready")
+            except AssertionError as exc:
+                logs = run("logs", name, check=False)
+                raise AssertionError(f"{exc}; container logs: {logs.stdout}{logs.stderr}") from exc
             status, body = request(base, "/api/state", origin=base)
             assert status == 200
             all_tasks = (
@@ -256,7 +260,13 @@ def test_container_contract():
         try:
             replacement_port = run("port", replacement, "8787/tcp").stdout.strip().rsplit(":", 1)[1]
             replacement_base = f"http://127.0.0.1:{replacement_port}"
-            wait_for(replacement_base + "/health/ready")
+            try:
+                wait_for(replacement_base + "/health/ready")
+            except AssertionError as exc:
+                logs = run("logs", replacement, check=False)
+                raise AssertionError(
+                    f"{exc}; replacement logs: {logs.stdout}{logs.stderr}"
+                ) from exc
             status, body = request(replacement_base, "/api/state", origin=replacement_base)
             assert status == 200
             all_tasks = (
