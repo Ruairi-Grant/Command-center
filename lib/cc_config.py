@@ -112,6 +112,11 @@ def load() -> AppConfig:
                 raise ConfigError(f"{label} must be an existing directory in production")
             if not os.access(path, os.R_OK | os.W_OK | os.X_OK):
                 raise ConfigError(f"{label} must be readable and writable in production")
+        data_path = os.path.join(data_home, "data")
+        if not os.path.isdir(data_path):
+            raise ConfigError("CC_DATA_DIR/data must be an existing directory in production")
+        if containerized and (not os.path.ismount(data_path) or not os.path.ismount(backup_home)):
+            raise ConfigError("container production requires mounted data and backup directories")
 
     return AppConfig(
         environment=environment,

@@ -9,7 +9,7 @@ services:
     environment:
       CC_ENV: production
       CC_CONTAINER: "true"
-      CC_DATA_DIR: /var/lib/command-centre/data
+      CC_DATA_DIR: /var/lib/command-centre
       CC_BACKUP_DIR: /var/lib/command-centre/backups
       CC_BIND_HOST: 0.0.0.0
       CC_PORT: "8787"

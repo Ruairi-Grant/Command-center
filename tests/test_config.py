@@ -38,8 +38,10 @@ def test_container_production_allows_internal_wildcard_bind(monkeypatch, tmp_pat
     data = tmp_path / "data"
     backups = tmp_path / "backups"
     data.mkdir()
+    (data / "data").mkdir()
     backups.mkdir()
     _set_production(monkeypatch, data, backups, CC_CONTAINER="true", CC_BIND_HOST="0.0.0.0")
+    monkeypatch.setattr(cc_config.os.path, "ismount", lambda path: True)
 
     config = cc_config.load()
 
@@ -53,6 +55,7 @@ def test_non_container_production_rejects_wildcard_bind(monkeypatch, tmp_path):
     data = tmp_path / "data"
     backups = tmp_path / "backups"
     data.mkdir()
+    (data / "data").mkdir()
     backups.mkdir()
     _set_production(monkeypatch, data, backups, CC_BIND_HOST="0.0.0.0")
 
