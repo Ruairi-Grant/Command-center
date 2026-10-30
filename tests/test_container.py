@@ -134,7 +134,11 @@ def test_container_contract():
         try:
             port = run("port", name, "8787/tcp").stdout.strip().rsplit(":", 1)[1]
             base = f"http://127.0.0.1:{port}"
-            wait_for(base + "/health/live")
+            try:
+                wait_for(base + "/health/live")
+            except AssertionError as exc:
+                logs = run("logs", name, check=False)
+                raise AssertionError(f"{exc}; container logs: {logs.stdout}{logs.stderr}") from exc
             wait_for(base + "/health/ready")
 
             status, body = request(
