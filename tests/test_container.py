@@ -88,9 +88,9 @@ def test_container_contract():
         "run",
         "--rm",
         tag,
-        "sh",
+        "python",
         "-c",
-        "find /app -type f \\( -name '*.jsonl' -o -name '*.db' -o -name '*.sqlite*' \\) -print",
+        "import os; print('\\n'.join(os.path.join(root, name) for root, _, files in os.walk('/app') for name in files if name.endswith(('.jsonl', '.db', '.sqlite', '.sqlite3'))))",
     ).stdout.strip()
     assert image_files == ""
 
