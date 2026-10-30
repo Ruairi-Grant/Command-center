@@ -66,6 +66,28 @@ def request(base: str, path: str, *, method: str = "GET", payload=None, origin=N
         return exc.code, json.loads(exc.read())
 
 
+def reset_mount_permissions(path: Path, image: str):
+    script = (
+        "import os; "
+        "[(os.chmod(os.path.join(root, name), 0o666)) for root, _, files in os.walk('/mnt') for name in files]; "
+        "[(os.chmod(root, 0o777)) for root, dirs, _ in os.walk('/mnt') for _ in dirs]"
+    )
+    run(
+        "run",
+        "--rm",
+        "--user",
+        "0:0",
+        "--entrypoint",
+        "python",
+        "-v",
+        f"{path}:/mnt",
+        image,
+        "-c",
+        script,
+        check=False,
+    )
+
+
 def test_container_contract():
     tag = IMAGE
     if "CC_CONTAINER_IMAGE" not in os.environ:
@@ -155,7 +177,13 @@ def test_container_contract():
 
             status, body = request(base, "/api/state", origin=base)
             assert status == 200
-            assert any(item["id"] == task_id for item in body["tasks"])
+            all_tasks = (
+                body["today_tasks"]
+                + body["upcoming_tasks"]
+                + body["no_date_tasks"]
+                + body["overdue"]
+            )
+            assert any(item["id"] == task_id for item in all_tasks)
 
             status, _ = request(
                 base,
@@ -183,9 +211,17 @@ def test_container_contract():
             wait_for(base + "/health/ready")
             status, body = request(base, "/api/state", origin=base)
             assert status == 200
-            assert any(item["id"] == task_id for item in body["tasks"])
+            all_tasks = (
+                body["today_tasks"]
+                + body["upcoming_tasks"]
+                + body["no_date_tasks"]
+                + body["overdue"]
+            )
+            assert any(item["id"] == task_id for item in all_tasks)
         finally:
             run("rm", "--force", name, check=False)
+            reset_mount_permissions(data, tag)
+            reset_mount_permissions(backups, tag)
 
         replacement = f"{name}-replacement"
         run(
@@ -223,9 +259,17 @@ def test_container_contract():
             wait_for(replacement_base + "/health/ready")
             status, body = request(replacement_base, "/api/state", origin=replacement_base)
             assert status == 200
-            assert any(item["title"] == "container integration task" for item in body["tasks"])
+            all_tasks = (
+                body["today_tasks"]
+                + body["upcoming_tasks"]
+                + body["no_date_tasks"]
+                + body["overdue"]
+            )
+            assert any(item["title"] == "container integration task" for item in all_tasks)
         finally:
             run("rm", "--force", replacement, check=False)
+            reset_mount_permissions(data, tag)
+            reset_mount_permissions(backups, tag)
 
     invalid = run(
         "run",
